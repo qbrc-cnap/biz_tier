@@ -130,3 +130,22 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAdminUser',
     )
 }
+
+
+###############################################################################
+# Parameters for Celery queueing
+###############################################################################
+CELERY_BROKER_URL = 'redis://localhost:6379'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+
+###############################################################################
+# Parameters for the QBRC mailbox
+###############################################################################
+MAIL_HOST = 'outlook.office365.com'
+MAIL_PORT = 993
+MAIL_USERNAME = ''
+MAIL_PASSWORD = ''
+MAIL_FOLDER_NAME = 'INBOX'

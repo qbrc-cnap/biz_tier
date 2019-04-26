@@ -11,6 +11,39 @@ class BaseUser(AbstractUser):
     pass
 
 
+class PendingUser(models.Model):
+    '''
+    This class is not a subtype of any Django user, but rather holds
+    information about potential users until an administrator can verify them.
+    '''
+
+    # is this pending user a principal investigator
+    is_pi = models.BooleanField(default = False, null=False)
+
+    # a JSON-format string holding the info we parsed from the email.
+    # Since PIs and non-PIs have different info, this keeps us from having
+    # to track different types of pending users.  Once the pending user is
+    # approved, we can parse this string and create users of the appropriate types
+    info_json = models.CharField(max_length=10000, null=False, blank=False)
+
+
+class ProcessedEmail(models.Model):
+    '''
+    We query the IMAP server to get emails with a particular subject.  Since these emails go to our inboxes, we cannot 
+    use the 'READ' flag to know whether this application has seen/processed the email before.  Hence, we have to track 
+    the UIDs that we DO parse/handle so we don't end up repeating work.
+    ''' 
+
+    # in case we use other mail servers, need to track the UID along with the mail server
+    mail_server_name = models.CharField(max_length=500, null=False, blank=False)
+
+    # also need to track the folder.  UID can change if folder changes
+    mail_folder_name = models.CharField(max_length=100, null=False, blank=False)
+
+    # the message UID.  Supposed to be a non-zero integer.  
+    message_uid = models.PositiveIntegerField(null=False, blank=False)
+
+
 class Organization(models.Model):
     '''
     This class adds an institutional hierarchy.  In this way, multiple research
