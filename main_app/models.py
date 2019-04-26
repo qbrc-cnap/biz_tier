@@ -65,7 +65,7 @@ class ResearchGroup(models.Model):
     # application, we do not keep the PI as a User object themself.
     pi_name = models.CharField(max_length=200, blank=False, null=False)
 
-    pi_email = models.EmailField(null=False, max_length=255)
+    pi_email = models.EmailField(unique=True, null=False, max_length=255)
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
 

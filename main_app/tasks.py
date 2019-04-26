@@ -9,7 +9,7 @@ from celery.decorators import task
 
 from helpers.email_utils import notify_admins, send_email
 
-from main_app.models import ProcessedEmail
+from main_app.models import ProcessedEmail, ResearchGroup
 
 
 class MailQueryException(Exception):
@@ -49,7 +49,8 @@ def handle_exception(ex, message = ''):
     This function handles ...
     '''
     subject = 'Error encountered'
-
+    if len(message) == 0:
+        message = str(ex)
     notify_admins(message, subject)
 
 
@@ -79,6 +80,8 @@ def parse_account_creation_email(payload):
     contents = [x.strip() for x in body_markup.text.split('\n') if len(x.strip()) > 0]
     for x in contents:
         key, val = x.strip().split(':', 1) # only split on first colon, since there could be a colon in the response
+        key = key.strip()
+        val = val.strip()
         if key in REQUIRED_ACCOUNT_CREATION_KEYS:
             info_dict[key] = val
     if len(set(REQUIRED_ACCOUNT_CREATION_KEYS).difference(info_dict.keys())) > 0:
@@ -86,12 +89,27 @@ def parse_account_creation_email(payload):
     return info_dict
 
 
-def process_single_email(message):
-    m = email.message_from_string(message[1].decode('utf-8'))
-    body_html = m.get_payload()
-    info_dict = parse_account_creation_email(payload)
-    return info_dict
+def process_single_email(message_uid, message):
 
+    # prior to processing this email, mark it so we don't parse it again in case things take a while and
+    # another mail query is performed:
+    p = ProcessedEmail.objects.create(
+        mail_server_name = settings.MAIL_HOST,
+        mail_folder_name = settings.MAIL_FOLDER_NAME,
+        message_uid = message_uid
+    )
+    p.save()
+
+    try:
+        m = email.message_from_string(message[1].decode('utf-8'))
+        body_html = m.get_payload()
+        info_dict = parse_account_creation_email(payload)
+        return info_dict
+    except Exception as ex:
+        # if anything went wrong, we do not want to accidentally mark this email
+        # as processed, so delete the database object:
+        p.delete()
+        raise ex
 
 def fetch_emails(mail, id_list):
     '''
@@ -107,6 +125,32 @@ def fetch_emails(mail, id_list):
         raise MailQueryException('Failed when fetching messages.')
     return messages
 
+def check_for_pi_account(info_dict):
+    '''
+    Looks into the database and returns bool indicating whether
+    we "know about" this PI
+    '''
+    pi_email = info_dict['PI_EMAIL']
+
+    try:
+        research_group = ResearchGroup.objects.get(pi_email = pi_email)
+        return True
+    except ResearchGroup.DoesNotExist:
+        # we do not know who this PI is!
+        return False
+
+def handle_unknown_pi_account(info_dict, is_pi_request):
+    '''
+    This function handles the business logic when a request
+    contains PI info that we do not recognize.  See comments below
+    for additional logic in this situation.
+
+    info_dict is a dictionary of information parsed from the email
+    is_pi_request is a bool indicating whether the account request
+    is for themself, as opposed to another user attempting to register
+    an account with someone else listed as their PI
+    '''
+
 
 def handle_request_email(info_dict):
     '''
@@ -114,6 +158,18 @@ def handle_request_email(info_dict):
     is a dictionary containing information parsed from the request email
     sent by qualtrics survey
     '''
+    is_pi_str = info_dict['PI']
+    if is_pi_str.lower() == 'no':
+        pi_request = True
+    else:
+        pi_request = False
+
+    pi_account_exists = check_for_pi_account(info_dict)
+
+    if not pi_account_exists:
+        handle_unknown_pi_account(info_dict, pi_request)
+
+    
 
 def process_emails(mail, id_list):
     '''
@@ -130,11 +186,17 @@ def process_emails(mail, id_list):
 
     # As mentioned above, the even indexes have tuples.  The mail body itself is contained in the second
     # slot in the tuple
-    for message in messages[::2]:
-        info_dict = process_single_email(message)
+    for uid, message in zip(id_list, messages[::2]):
+        try:
+            info_dict = process_single_email(uid, message)
 
-        # call the logic for account creation
-        handle_request_email(info_dict)
+            # call the logic for account creation
+            handle_request_email(info_dict)
+
+        except Exception as ex:
+            # handle each email error individually.  This way a single
+            # error does not block other requests that are correct.
+            handle_exception(ex)
 
 
 
@@ -194,7 +256,17 @@ def check_for_qualtrics_survey_results():
     application.
     '''
 
-    mail = get_mailbox()
-    id_list = query_imap_server_for_ids(mail)
-    unprocessed_uids = [uid for uid in id_list if is_new_email(settings.MAIL_HOST, settings.MAIL_FOLDER_NAME, uid)]
-    process_emails(mail, unprocessed_uids)
+    # if something fails during this block, just block future
+    try:
+        mail = get_mailbox()
+        id_list = query_imap_server_for_ids(mail)
+        unprocessed_uids = [uid for uid in id_list if is_new_email(settings.MAIL_HOST, settings.MAIL_FOLDER_NAME, uid)]
+        
+        # if we get here, then the connection and initial email query completed succesfully.
+        # The process_emails function handles exceptions on each email individually (and handles 
+        # those individual exceptions) so bad requests do not block potentiall valid ones
+        process_emails(mail, unprocessed_uids)
+    except Exception as ex:
+        # This should catch any exceptions raised prior to the point at which we
+        # start processing individual emails
+        handle_exception(ex)
