@@ -1,0 +1,18 @@
+<html>
+    <body>
+        <h2>
+            The following account request was received:
+        </h2>
+        <pre>
+            {{formatted_json_str}}
+        </pre>
+        <p>If you do <b>not</b> approve you do not need to do anything.  If you do, click the button below, which
+            will start the downstream account creation process and inform the various parties.
+        </p>
+        <form>
+            {{csrf_token}}
+            <input type="submit" value="Approve">
+        </form>
+    </body>
+
+</html>

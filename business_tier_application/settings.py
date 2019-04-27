@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
     'rest_framework', 
     'main_app'
 ]
@@ -121,16 +122,16 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 
+# Configuration for Sites framework:
+SITE_ID = 1
 
 AUTH_USER_MODEL = 'main_app.BaseUser'
-
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAdminUser',
     )
 }
-
 
 ###############################################################################
 # Parameters for Celery queueing
@@ -149,3 +150,9 @@ MAIL_PORT = 993
 MAIL_USERNAME = ''
 MAIL_PASSWORD = ''
 MAIL_FOLDER_NAME = 'INBOX'
+
+# some dummy emails for testing purposes.  If an email function is invoked
+# with any of these emails, it will not actually try to send.
+TEST_EMAIL_ADDRESSES = ['foo@bar.com',]
+
+QBRC_EMAIL = 'qbrc@hsph.harvard.edu'

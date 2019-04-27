@@ -14,10 +14,10 @@ class BaseUser(AbstractUser):
 class PendingUser(models.Model):
     '''
     This class is not a subtype of any Django user, but rather holds
-    information about potential users until an administrator can verify them.
+    information about potential users until an administrator and PI can verify the request.
     '''
 
-    # is this pending user a principal investigator
+    # was this requested by a principal investigator
     is_pi = models.BooleanField(default = False, null=False)
 
     # a JSON-format string holding the info we parsed from the email.
@@ -25,6 +25,13 @@ class PendingUser(models.Model):
     # to track different types of pending users.  Once the pending user is
     # approved, we can parse this string and create users of the appropriate types
     info_json = models.CharField(max_length=10000, null=False, blank=False)
+
+    # a long hash invitation key.  Prior to the QBRC approving an account, this is set
+    # to null.  Once approved by the QBRC, a key will be generated and filled-in.
+    approval_key = models.CharField(max_length=100, null=True, blank=True)
+
+    # the date of the request so we may expire those that are old
+    request_date = models.DateField(auto_now_add = True)
 
 
 class ProcessedEmail(models.Model):
@@ -49,7 +56,7 @@ class Organization(models.Model):
     This class adds an institutional hierarchy.  In this way, multiple research
     groups of individuals can be grouped according to this class
     '''
-    name = models.CharField(max_length=200, blank=False, null=False)
+    name = models.CharField(max_length=200, blank=True, null=True)
 
     # other info about an organization?
 
@@ -67,7 +74,10 @@ class ResearchGroup(models.Model):
 
     pi_email = models.EmailField(unique=True, null=False, max_length=255)
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
+    # We allow the organization to be null
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, null=True)
+
+    
 
 
 class Payment(models.Model):
@@ -116,6 +126,9 @@ class CnapUser(models.Model):
     # a user can be associated with potentially multiple research groups, and obviously
     # each research group has multiple users, so we establish a many-to-many relationship
     research_group = models.ManyToManyField(ResearchGroup)
+
+    # when they joined
+    join_date = models.DateField(auto_now_add = True)
 
 
 class Purchase(models.Model):

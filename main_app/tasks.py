@@ -3,13 +3,23 @@ import email
 import ssl
 import re
 import bs4
+import json
+import hashlib
+import uuid
 
 from django.conf import settings
+from django.urls import reverse
+from django.contrib.sites.models import Site
+from django.contrib.auth import get_user_model
+
 from celery.decorators import task
 
 from helpers.email_utils import notify_admins, send_email
 
-from main_app.models import ProcessedEmail, ResearchGroup
+from main_app.models import ProcessedEmail, \
+    ResearchGroup, \
+    PendingUser, \
+    Organization
 
 
 class MailQueryException(Exception):
@@ -43,6 +53,277 @@ REQUIRED_ACCOUNT_CREATION_KEYS = ['FIRST_NAME', \
     'POSTAL_CODE', \
     'COUNTRY'
 ]
+
+def send_self_approval_email_to_pi(pending_user_instance):
+    '''
+    This function constructs the email that is sent to the PI
+    when they themselves have requested an account for themself
+
+    Requiring an approval link keeps others from spoofing their PI
+    '''
+
+    user_info = json.loads(pending_user_instance.info_json)
+    pi_email = user_info('PI_EMAIL')
+    approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    full_url = 'https://%s%s' % (domain, approval_url)
+    subject = '[CNAP] New account confirmation'
+    plaintext_msg = '''
+        A new account was requested, which listed your email as the principal investigator. 
+        The information we collected was:
+        -------------------------------------
+        %s
+        -------------------------------------
+        Click the following link (or copy/paste into a browser) to approve this: %s
+
+        If you do not approve this request, you do not need to do anything.  No accounts
+        are created without proper confirmation.
+
+        - QBRC staff
+    ''' % (json.dumps(user_info), full_url)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>A new account was requested, which listed your email as the principal investigator.</p>
+        <p>The information we collected was</p>
+        <hr>
+        <pre>
+        %s
+        </pre>
+        <hr>
+        <p>Click <a href="%s">here</a> to approve this request. </p>
+
+        <p>If you do not approve this request, you do not need to do anything.  No accounts
+        are created without proper confirmation.</p> 
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    ''' % (json.dumps(user_info), full_url)
+    send_email(plaintext_msg, message_html, pi_email, subject)
+
+
+def send_approval_email_to_pi(pending_user_instance):
+    '''
+    This function constructs the email that is sent to the PI
+    when someone else has listed them as a PI
+    '''
+
+    user_info = json.loads(pending_user_instance.info_json)
+    pi_email = user_info('PI_EMAIL')
+    approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    full_url = 'https://%s%s' % (domain, approval_url)
+    subject = '[CNAP] New account confirmation'
+    requesting_user_firstname = user_info['FIRST_NAME']
+    requesting_user_lastname = user_info['LAST_NAME']
+    requesting_user_email = user_info['EMAIL']
+
+    plaintext_msg = '''
+        A new account was requested, which listed your email as the principal investigator.  The requesting
+        user was:
+        -------------------------------------
+        %s %s (%s)
+        -------------------------------------
+        Click the following link (or copy/paste into a browser) to approve this: %s
+
+        If you do not approve this request, you do not need to do anything.  No accounts
+        are created without proper authorization by the principal investigator.
+
+        - QBRC staff
+    ''' % (requesting_user_firstname, requesting_user_lastname, requesting_user_email, full_url)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>A new account was requested, which listed your email as the principal investigator.</p>
+        <p>The information we collected was</p>
+        <hr>
+        <p>%s %s (%s)<p>
+        <hr>
+        <p>Click <a href="%s">here</a> to approve this request. </p>
+
+        <p>If you do not approve this request, you do not need to do anything.  No accounts
+        are created without proper authorization by the principal investigator.</p> 
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    ''' % (requesting_user_firstname, requesting_user_lastname, requesting_user_email, full_url)
+
+    send_email(plaintext_msg, message_html, pi_email, subject)
+
+
+def send_account_pending_email_to_requester(p):
+    '''
+    This sends a message to a user who has requested an account, but lists someone
+    else as the PI.  We let them know that the PI has to still approve
+    ''' 
+    user_info = json.loads(pending_user_instance.info_json)
+    pi_email = user_info('PI_EMAIL')
+    approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    full_url = 'https://%s%s' % (domain, approval_url)
+    subject = '[CNAP] Notification: account pending'
+    requesting_user_email = user_info['EMAIL']
+
+    plaintext_msg = '''
+        This email is to let you know that your account request has been approved by the QBRC staff,
+        but still requires approval of the principal investigator you have listed (%s).  The PI 
+        has also been notified of this request.
+        
+        Until approval is granted by the PI, your request will be pending.  No accounts are created 
+        without proper authorization by the principal investigator.
+
+        - QBRC staff
+    ''' % (pi_email)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>
+        This email is to let you know that your account request has been approved by the QBRC staff,
+        but still requires approval of the principal investigator you have listed (%s).  The PI 
+        has also been notified of this request.
+        </p>
+
+        <p>Until approval is granted by the PI, your request will be pending.  No accounts are created 
+        without proper authorization by the principal investigator.</p> 
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    ''' % (pi_email)
+
+    send_email(plaintext_msg, message_html, requesting_user_email, subject)
+
+
+def send_account_confirmed_email_to_requester(p):
+    '''
+    This sends a message to a user who has requested an account once
+    the PI has approved the request
+    ''' 
+    user_info = json.loads(pending_user_instance.info_json)
+    pi_email = user_info('PI_EMAIL')
+    approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    full_url = 'https://%s%s' % (domain, approval_url)
+    subject = '[CNAP] New account created'
+    requesting_user_email = user_info['EMAIL']
+
+    plaintext_msg = '''
+        This email is to let you know that your account request has been approved by your
+        principal investigator you have listed (%s).  You may now request analysis projects
+        on the CNAP platform.
+
+        - QBRC staff
+    ''' % (pi_email)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>
+        This email is to let you know that your account request has been approved by your
+        principal investigator you have listed (%s).  You may now request analysis projects
+        on the CNAP platform
+        </p>
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    ''' % (pi_email)
+
+    send_email(plaintext_msg, message_html, requesting_user_email, subject)
+
+@task(name='pi_approve_pending_user')
+def pi_approve_pending_user(pending_user_pk):
+    '''
+    The PI has authorized the account.
+    '''
+    # get the PendingUser instance:
+    p = PendingUser.objects.get(pk=pending_user_pk)
+    info_dict = json.loads(p.info_json)
+    is_pi = p.is_pi
+
+    org = None
+    if len(info_dict['ORGANIZATION']) > 0:
+        org = Organization.objects.create(name = info_dict['ORGANIZATION'])
+
+    # create a ResearchGroup lead by this PI:
+    rg = ResearchGroup.objects.create(
+        organization = org,
+        pi_email = info_dict['PI_EMAIL'],
+        pi_name = '%s %s' % (info_dict['PI_FIRST_NAME'], info_dict['PI_LAST_NAME'])
+    )
+    rg.save()
+
+    # regardless of the request, create a user representing this PI:
+    pi_user_obj = get_user_model().objects.create(
+        username = info_dict['PI_EMAIL'],
+        first_name = info_dict['PI_FIRST_NAME'],
+        last_name = info_dict['PI_LAST_NAME'],
+        email = info_dict['PI_EMAIL']
+    )
+    pi_user_obj.save()
+
+    # if the request was made by someone other than the PI, also create a user
+    # instance for that person
+    if not is_pi:
+        new_user_obj = get_user_model().objects.create(
+            username = info_dict['EMAIL'],
+            first_name = info_dict['FIRST_NAME'],
+            last_name = info_dict['LAST_NAME'],
+            email = info_dict['EMAIL']
+        )
+        new_user_obj.save()
+
+        # Let this user know their PI has approved the request.
+        send_account_confirmed_email_to_requester(p)
+
+    # at this point we can remove the PendingUser:
+    #TODO: do we delete, or mark 'invative'?
+    # How are we capturing the financial info???
+    #p.delete()
+
+
+
+@task(name='staff_approve_pending_user')
+def staff_approve_pending_user(pending_user_pk):
+    '''
+    A staff member has indicated that this pending user should be approved for use of CNAP.  Start the downstream processes.
+    '''
+
+    # get the PendingUser instance:
+    p = PendingUser.objects.get(pk=pending_user_pk)
+    info_dict = json.loads(p.info_json)
+    is_pi = p.is_pi
+
+    # generate a random key which will be used as part of the link sent to the PI.  When the PI clicks on that, it will
+    # allow us to reference the PendingUser obj
+    salt = uuid.uuid4().hex
+    s = (info_dict['PI_EMAIL'] + salt).encode('utf-8')
+    approval_key = hashlib.sha256(s).hexdigest()
+    p.approval_key = approval_key
+    p.save()
+
+    # if it was a request by the PI, we simply let them know their request was approved.
+    # Note that they still have to approve by clicking in an email-- otherwise anyone could spoof their PI
+    if is_pi:
+        send_self_approval_email_to_pi(p)
+
+    # if the request was made by a 'regular' user, and they listed an unknown PI, we need to first
+    # get approval of the PI.  Send email to PI asking for approval and send email to client telling them 
+    # that the request is pending their PI's approval.
+    else:
+        send_approvail_email_to_pi(p)
+        send_account_pending_email_to_requester(p)
+
+
 
 def handle_exception(ex, message = ''):
     '''
@@ -139,6 +420,39 @@ def check_for_pi_account(info_dict):
         # we do not know who this PI is!
         return False
 
+
+def inform_staff_of_new_account(pending_user):
+
+    user_info = json.loads(pending_user.info_json)
+    approval_url = reverse('staff_account_approval', args=[pending_user.pk,])
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    full_url = 'https://%s%s' % (domain, approval_url)
+    subject = '[CNAP] New account request'
+    plaintext_msg = '''
+        A new account request was received:
+        -------------------------------------
+        %s
+        -------------------------------------
+        Go to this link to approve: %s
+    ''' % (json.dumps(user_info), full_url)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>A new account request was received:</p>
+        <hr>
+        <pre>
+        %s
+        </pre>
+        <hr>
+        Go <a href="%s">here</a> to approve.
+        </body>
+        </html>
+    ''' % (json.dumps(user_info), full_url)
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
+
+
 def handle_unknown_pi_account(info_dict, is_pi_request):
     '''
     This function handles the business logic when a request
@@ -150,6 +464,16 @@ def handle_unknown_pi_account(info_dict, is_pi_request):
     is for themself, as opposed to another user attempting to register
     an account with someone else listed as their PI
     '''
+    
+    # create a PendingUser:
+    # Note that all the request info is placed into the info_json field, so we can
+    # resolve the creation of regular users and PI later on
+    p = PendingUser.objects.create(is_pi = is_pi_request, info_json = info_dict)
+    p.save()
+
+    # inform our staff about this request so we can review before allowing
+    # them to proceed further.
+    inform_staff_of_new_account(p) 
 
 
 def handle_request_email(info_dict):
