@@ -107,7 +107,7 @@ class Payment(models.Model):
     '''
     CREDIT_CARD = 'CC'
     PURCHASE_ORDER = 'PO'
-    JOURNAL_NUMBER = 'JN'
+    COSTING_STRING = 'CS'
 
     # for using choices, need to define a tuple of tuples
     # the first item in the nested tuple is the value that is stored in the db,
@@ -115,7 +115,7 @@ class Payment(models.Model):
     PAYMENT_TYPES = (
         (CREDIT_CARD, 'Credit card'),
         (PURCHASE_ORDER, 'Purchase order (PO)'),
-        (JOURNAL_NUMBER, 'Journal number')
+        (COSTING_STRING, 'Costing string')
     )
     payment_type = models.CharField(max_length = 2, choices=PAYMENT_TYPES)
 
@@ -137,6 +137,19 @@ class Payment(models.Model):
     payment_amount = models.FloatField(null=True)
 
 
+class Budget(models.Model):
+    '''
+    This allows us to check if purchases made against a payment are valid, or whether they have exceeded.
+    We keep this separate from the Payment table since that payments should not care about the concept of a budget
+    '''
+
+    # the payment we are referencing
+    payment = models.ForeignKey(Paymemt, on_delete=models.CASCADE)
+
+    # current_usage.  This is updated as purchases are made against the payment
+    current_sum = models.FloatField(default=0.0)
+    
+    
 class CnapUser(models.Model):
     '''
     This adds to the base class of User.  The reason is that we have users of
@@ -153,6 +166,9 @@ class CnapUser(models.Model):
 
     # when they joined
     join_date = models.DateField(auto_now_add = True)
+
+    class Meta:
+        unique_together = ('user','research_group')
 
 
 class Purchase(models.Model):
@@ -191,6 +207,13 @@ class Product(models.Model):
     # If True, then a limit is imposed and need to check the quantity field
     # By default, it is False, which creates unlimited quantity of a product
     is_quantity_limited = models.BooleanField(default=False)
+
+    # the primary key of the workflow from the actual CNAP application.  This
+    # allows us to automatically generate projects based on the particular workflow
+    cnap_workflow_pk = models.PositiveIntegerField(null=False)
+
+    # how much does each unit of this product/analysis cost?  Allows us to check budgets.
+    unit_cost = models.FloatField(null=False)
 
 
 class Order(models.Model):

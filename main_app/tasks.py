@@ -20,8 +20,10 @@ from main_app.models import ProcessedEmail, \
     ResearchGroup, \
     PendingUser, \
     Organization, \
-    FinancialCoordinator
-
+    FinancialCoordinator, \
+    CnapUser, \
+    Payment, \
+    Budget
 
 class MailQueryException(Exception):
     pass
@@ -54,6 +56,21 @@ REQUIRED_ACCOUNT_CREATION_KEYS = ['FIRST_NAME', \
     'POSTAL_CODE', \
     'COUNTRY'
 ]
+
+REQUIRED_PIPELINE_CREATION_KEYS = {
+    'REGISTERED',
+    'EMAIL',
+    'PI_EMAIL',
+    'HAVE_ACCT_NUM',
+    'ACCT_NUM',
+    'NUM_OF_SAMPLE',
+    'PIPELINE',
+    'SEQ_TYPE'
+}
+
+# flags for common reference
+ACCOUNT_REQUEST = 'account request'
+PIPELINE_REQUEST = 'pipeline request'
 
 def send_self_approval_email_to_pi(pending_user_instance):
     '''
@@ -165,10 +182,6 @@ def send_account_pending_email_to_requester(p):
     ''' 
     user_info = json.loads(pending_user_instance.info_json)
     pi_email = user_info('PI_EMAIL')
-    approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
-    current_site = Site.objects.get_current()
-    domain = current_site.domain
-    full_url = 'https://%s%s' % (domain, approval_url)
     subject = '[CNAP] Notification: account pending'
     requesting_user_email = user_info['EMAIL']
 
@@ -210,10 +223,6 @@ def send_account_confirmed_email_to_requester(p):
     ''' 
     user_info = json.loads(pending_user_instance.info_json)
     pi_email = user_info('PI_EMAIL')
-    approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
-    current_site = Site.objects.get_current()
-    domain = current_site.domain
-    full_url = 'https://%s%s' % (domain, approval_url)
     subject = '[CNAP] New account created'
     requesting_user_email = user_info['EMAIL']
 
@@ -283,6 +292,16 @@ def instantiate_new_research_group(info_dict):
     )
     pi_user_obj.save()
 
+    # above that created a regular Django user instance.  We also create a CnapUser instance, which
+    # lets us associate the user with a research group
+    cnap_user = CnapUser.objects.create(
+        user=pi_user_obj,
+        research_group = rg
+    )
+    cnap_user.save()
+
+    return rg
+
 
 @task(name='pi_approve_pending_user')
 def pi_approve_pending_user(pending_user_pk):
@@ -297,22 +316,38 @@ def pi_approve_pending_user(pending_user_pk):
     is_pi = p.is_pi
 
     # does this group already exist?
-    group_exists = check_for_pi_account(info_dict)
+    rg = check_for_pi_account(info_dict)
 
     # if the group does not exist, create it, including the PI
-    if not group_exists:
-        instantiate_new_research_group(info_dict)
+    if not rg:
+        rg = instantiate_new_research_group(info_dict)
 
     # if the request was made by someone other than the PI, create a user
     # instance for that person
     if not is_pi:
-        new_user_obj = get_user_model().objects.create(
-            username = info_dict['EMAIL'],
-            first_name = info_dict['FIRST_NAME'],
-            last_name = info_dict['LAST_NAME'],
-            email = info_dict['EMAIL']
+        # check if the user already exists.  This can be the case if
+        # an existing user goes to another lab where the PI did not have 
+        # a CNAP account.  In this case, we already know of the 'regular'
+        # user.
+        try:
+            user_obj = get_user_model().objects.get(email = info_dict['EMAIL'])
+        except Exception:
+            # a user with that email was not found.  Create a new basic user instance
+            user_obj = get_user_model().objects.create(
+                username = info_dict['EMAIL'],
+                first_name = info_dict['FIRST_NAME'],
+                last_name = info_dict['LAST_NAME'],
+                email = info_dict['EMAIL']
+            )
+            user_obj.save()
+
+        # above that created or queried a regular Django user instance.  We also create a CnapUser instance, which
+        # lets us associate the user with a research group
+        cnap_user = CnapUser.objects.create(
+            user=user_obj,
+            research_group = rg
         )
-        new_user_obj.save()
+        cnap_user.save()
 
         # Let this user know their PI has approved the request.
         send_account_confirmed_email_to_requester(p)
@@ -383,9 +418,9 @@ def is_new_email(mail_server, folder, email_uid):
     return len(p) == 0
 
 
-def parse_account_creation_email(payload):
+def parse_email_contents(payload, required_keyset):
     '''
-    Parses the email payload and returns a dictionary
+    Parses the email payload for an account request and returns a dictionary
     '''
     bs = bs4.BeautifulSoup(payload, 'html.parser')
     try:
@@ -398,14 +433,14 @@ def parse_account_creation_email(payload):
         key, val = x.strip().split(':', 1) # only split on first colon, since there could be a colon in the response
         key = key.strip()
         val = val.strip()
-        if key in REQUIRED_ACCOUNT_CREATION_KEYS:
+        if key in required_keyset:
             info_dict[key] = val
-    if len(set(REQUIRED_ACCOUNT_CREATION_KEYS).difference(info_dict.keys())) > 0:
+    if len(set(required_keyset).difference(info_dict.keys())) > 0:
         raise MailParseException('Required information was missing in the email sent for account creation.')
     return info_dict
 
 
-def process_single_email(message_uid, message):
+def get_email_body(message_uid, message):
 
     # prior to processing this email, mark it so we don't parse it again in case things take a while and
     # another mail query is performed:
@@ -418,14 +453,14 @@ def process_single_email(message_uid, message):
 
     try:
         m = email.message_from_string(message[1].decode('utf-8'))
-        body_html = m.get_payload()
-        info_dict = parse_account_creation_email(payload)
-        return info_dict
+        return m.get_payload()
+
     except Exception as ex:
         # if anything went wrong, we do not want to accidentally mark this email
         # as processed, so delete the database object:
         p.delete()
         raise ex
+
 
 def fetch_emails(mail, id_list):
     '''
@@ -449,11 +484,10 @@ def check_for_pi_account(info_dict):
     pi_email = info_dict['PI_EMAIL']
 
     try:
-        research_group = ResearchGroup.objects.get(pi_email = pi_email)
-        return True
+        return ResearchGroup.objects.get(pi_email = pi_email)
     except ResearchGroup.DoesNotExist:
         # we do not know who this PI is!
-        return False
+        return None
 
 
 def inform_staff_of_new_account(pending_user):
@@ -497,7 +531,7 @@ def handle_unknown_pi_account(info_dict, is_pi_request):
     info_dict is a dictionary of information parsed from the email
     is_pi_request is a bool indicating whether the account request
     is for themself, as opposed to another user attempting to register
-    an account with someone else listed as their PI
+    an account (with someone else listed as their PI)
     '''
     
     # create a PendingUser:
@@ -511,7 +545,7 @@ def handle_unknown_pi_account(info_dict, is_pi_request):
     inform_staff_of_new_account(p) 
 
 
-def inform_pi_of_existing_account(info_dict):
+def inform_user_of_existing_account(info_dict):
     '''
     This function is triggered if we receive an account request from the 
     PI themself but we already know of them.  Simply remind them
@@ -520,59 +554,451 @@ def inform_pi_of_existing_account(info_dict):
     domain = current_site.domain
     subject = '[CNAP] Duplicate account request received'
     plaintext_msg = '''
-        A new account request for %s was received with your email
-        listed as the PI.  We already have an account
-        with that email, so no action has been performed.
-    ''' % domain
+        A new account request for CNAP was received for your email.  We already have an account
+        with that email associated with your designated PI, so no action has been performed.
+    '''
 
     message_html = '''
         <html>
         <body>
         <p>        
-        A new account request for %s was received with your email
-        listed as the PI.  We already have an account
-        with that email, so no action has been performed.</p>
+        A new account request for CNAP was received for your email.  We already have an account
+        with that email associated with your designated PI, so no action has been performed.</p>
         </body>
         </html>
-    ''' % domain
+    '''
+
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
 
 
-def handle_request_email(info_dict):
+def determine_if_existing_user(info_dict):
     '''
-    This contains our business logic for account creation.  info_dict
-    is a dictionary containing information parsed from the request email
-    sent by qualtrics survey
+    Detemines whether this user already existed in our system
+    Note that it looks at the 'base' user object. NOT the CnapUser
     '''
-    is_pi_str = info_dict['PI']
-    if is_pi_str.lower() == 'no':
-        pi_request = True
-    else:
-        pi_request = False
+    try:
+        return get_user_model().objects.get(info_dict['EMAIL'])
+    except Exception as ex:
+        return None
 
-    pi_account_exists = check_for_pi_account(info_dict)
 
-    # this is a new PI- need to start the flow for new accounts
-    if not pi_account_exists:
+def handle_account_request_for_existing_user(info_dict, existing_user, pi_request, research_group):
+    '''
+    This covers the case where we know about a particular user.  Depending on the PI status
+    we do a few different things
+    '''
+
+    if not research_group:
         handle_unknown_pi_account(info_dict, pi_request)
-    else: # the PI is known to us.  
-        if pi_request:
-            # if it's the PI trying again, just let them know we already have their records
-            inform_pi_of_existing_account(info_dict)
+    else:
+        # we have an existing user and an existing group.  Are they already associated?
+        # the case where there is an existing research group and it's the PI who is making
+        # the request is handled elsewhere.  Thus, the existing user here is a "regular" user
+        # not a PI
+        try:
+            c = CnapUser.objects.get(user=existing_user, research_group=research_group)
 
-        else:
-            # if it's NOT the PI, then it's someone trying to associate with an existing PI,
-            # such as a new postdoc.  We first ask for the PI to validate this activity
-            # We must first create a PendingUser and generate an approval key.
+            # if we are here, we have the case where an existing user who is already associated
+            # with this lab has repeated their request.  Simply email them to let them know
+            # they already have an account.
+            inform_user_of_existing_account(info_dict)
+
+        except CnapUser.DoesNotExist:
+            # was not found, so the existing user was not previously associated with the existing
+            # ResearchGroup.  Need to have the PI confirm this association.
             p = PendingUser.objects.create(is_pi = False, info_json = info_dict)
             p.save()
             add_approval_key_to_pending_user(p)
 
             # now send the email with the confirmation link.
             send_approval_email_to_pi(p)
+
+
+def handle_account_request_for_new_user(info_dict, pi_request, research_group):
+    '''
+    If the user did not previously exist.  PI may or may not exist
+    '''
+    
+    if not research_group:
+        handle_unknown_pi_account(info_dict, pi_request)
+    else: # PI account exists
+        # We first ask for the PI to validate this activity
+        # We must first create a PendingUser and generate an approval key.
+        p = PendingUser.objects.create(is_pi = False, info_json = info_dict)
+        p.save()
+        add_approval_key_to_pending_user(p)
+
+        # now send the email with the confirmation link.
+        send_approval_email_to_pi(p)
+
+        # let the requester know that they are waiting on the PI 
+        # to approve
+        send_account_pending_email_to_requester(p)
+
+
+def handle_account_request_email(info_dict):
+    '''
+    This contains our business logic for account creation.  info_dict
+    is a dictionary containing information parsed from the request email
+    sent by qualtrics survey
+ 
+    '''
+
+    # do we know of this user?  Whether the request was from a PI or a regular
+    # user, this query is applicable.
+    existing_user = determine_if_existing_user(info_dict)
+
+    is_pi_str = info_dict['PI']
+    if is_pi_str.lower()[0] == 'y':
+        pi_request = True
+    else:
+        pi_request = False
+
+    # simply checks if the PI has an existing research group.  Does not look at
+    # whether the requester was previously associated with that group
+    research_group = check_for_pi_account(info_dict)
+
+    if pi_request and research_group:
+        # they simply forgot-- email to let them know they have an account already
+        inform_user_of_existing_account(info_dict)
+        return
+
+    # we now have info about whether this user previously existed AND whether
+    # there is a ResearchGroup for the PI.
+    if existing_user:
+        handle_account_request_for_existing_user(info_dict, existing_user, pi_request, research_group)
+    else:
+        handle_account_request_for_new_user(info_dict, pi_request, research_group)
     
 
-def process_emails(mail, id_list):
+def ask_requester_to_register_first(email):
+    '''
+    This sends a message to a user who has requested an pipeline, but is unknown to us
+    ''' 
+
+    subject = '[CNAP] Your pipeline request'
+
+    plaintext_msg = '''
+        This email is to let you know that your pipeline request was denied since you have not registered an active account with 
+        us.  Please fill out the account request first.
+        - QBRC staff
+    '''
+
+    message_html = '''
+        <html>
+        <body>
+        <p>
+        This email is to let you know that your pipeline request was denied since you have not registered an active account with 
+        us.  Please fill out the account request first.
+        </p>
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    '''
+
+    send_email(plaintext_msg, message_html, email, subject)
+
+
+def ask_requester_to_associate_with_pi_first(info_dict):
+    '''
+    This messages a user who is requesting a pipeline.  We know about this user, but they are listing
+    a PI who they have not previously associated with.  This could be the case if someone switched labs.
+    '''
+
+    # at this point we only know that we know this user.  We have also found that they are not
+    # associated with the PI given in their request.  HOWEVER, we have not checked that said PI
+    # has an account in our system.  Depending on existence of the PI, we send different messages.
+
+    pi_exists = check_for_pi_account(info_dict)
+
+    if pi_exists:
+        message = '''
+            Although your email is known to our system, we do not have a record of this email being associated with the 
+            principal investigator you listed (%s).  Please submit an account request so establish yourself as a member
+            of this new group.
+        ''' % info_dict['PI_EMAIL']
+    else:
+        message = '''
+            Although your email is known to our system, we do not have a record of the 
+            principal investigator you listed (%s).  Please submit an account request so establish yourself as a member
+            of this new group.  This will require the PI to approve your request.
+        ''' % info_dict['PI_EMAIL']
+
+    subject = '[CNAP] Your pipeline request'
+
+    plaintext_msg = '''
+        %s
+
+        - QBRC staff
+    ''' % message
+
+    message_html = '''
+        <html>
+        <body>
+        <p>
+        %s
+        </p>
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    ''' % message
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
+
+def inform_qbrc_of_request_without_payment_number(info_dict):
+
+    subject = '[CNAP] Pipeline request received without payment account'
+    plaintext_msg = '''
+        A new pipeline request was received that did not specify a payment account:
+        -------------------------------------
+        %s
+        -------------------------------------
+    ''' % json.dumps(info_dict)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>A new pipeline request was received that did not specify a payment account:</p>
+        <hr>
+        <pre>
+        %s
+        </pre>
+        <hr>
+        </body>
+        </html>
+    ''' % json.dumps(user_info)
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
+
+
+def calculate_total_purchase(info_dict):
+    '''
+    This calculates the total cost of a particular purchase and returns
+    that number
+    '''
+    pass
+
+def handle_no_payment_number(info_dict):
+    '''
+    If a pipeline was requested, but the user did not specify an account number
+    we end up here.
+    '''
+    # prepare some cost estimate:
+    total_cost = calculate_total_purchase(info_dict)
+
+    # message the user
+    subject = '[CNAP] Pipeline request-- more information needed'
+
+    plaintext_msg = '''
+        The pipeline request you have submitted was not associated with a known
+        payment method.  The QBRC will be in contact with you to work out details.
+
+        The total cost of the request is $%.2f
+    ''' % total_cost
+
+    message_html = '''
+        <html>
+        <body>
+        <p>The pipeline request you have submitted was not associated with a known
+        payment method.  The QBRC will be in contact with you to work out details.</p>
+        <p>The total cost of the request is $%.2f</p>
+        </body>
+        </html>
+    ''' % total_cost
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
+
+def ask_user_to_resubmit_payment_info(info_dict):
+    '''
+    We end up here if the user has submitted a pipeline request and has provided
+    a payment number that we cannot find. It is possible it was a typo, etc.
+    so we let them know.
+    '''
+    # message the user
+    subject = '[CNAP] Pipeline request-- payment account not found'
+
+    plaintext_msg = '''
+        The pipeline request you have submitted was not associated with a known
+        payment method, according to our records.  Please check that you have typed
+        the number correctly.  If you believe this is in error, please contact the QBRC.
+
+        Provided payment number: %s
+    ''' % info_dict['ACCT_NUM']
+
+    message_html = '''
+        <html>
+        <body>
+        <p>The pipeline request you have submitted was not associated with a known
+        payment method, according to our records.  Please check that you have typed
+        the number correctly.  If you believe this is in error, please contact the QBRC.</p>
+
+        <p>Provided payment number: %s</p>
+        </body>
+        </html>
+    ''' % info_dict['ACCT_NUM']
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
+
+def create_budget(payment_ref, current_sum = 0.0):
+    '''
+    Used to create Budget instances, e.g. in cases where there was none
+    made previously
+    '''
+
+    budget = Budget.objects.create(
+        payment=payment_ref, 
+        current_sum =current_sum
+    )
+    budget.save()
+    return budget
+
+
+def check_that_purchase_is_valid_against_payment(info_dict, payment_ref):
+    '''
+    If this function is invoked, the user and account number are valid, but
+    we still need to check that the purchase is OK given the potential budget, etc.
+
+    Returns a tuple.  The first item is a bool indicating that the purchase is ok.
+    The second gives a string, which can inform the user what was wrong
+    with their purchase
+    '''
+    total_cost = calculate_total_purchase(info_dict)
+
+    try:
+        budget = Budget.objects.get(payment=payment_ref)
+    except Budget.DoesNotExist:
+        # If here, then there was obviously no Budget associated
+        # with this Payment instance.  
+        budget = create_budget(payment_ref)
+
+    payment_amount = payment_ref.payment_amount
+    if payment_amount:
+        current_charges_against_payment = budget.current_sum
+        new_sum = current_charges_against_payment + total_cost
+        if new_sum > payment_amount:
+            rejection_reason = '''
+            The cost of the requested project exceeds the payment it is 
+            billed against.  Please contact the QBRC to resolve this.
+            '''
+            return (False, rejection_reason)
+        else: # the new charge did not exceed the payment, so it's allowed
+            # update the budget to reflect this new charge and save it:
+            budget.current_sum = new_sum
+            budget.save()
+            return (True, None)
+    else:
+        # if the payment_amount field is NULL, then this indicates something like an
+        # open PO or some other payment that is not limited up front
+        return (True, None)
+
+
+def fill_order(info_dict, payment_ref):
+    '''
+    Contacts CNAP to create a project
+    '''
+    #TODO: implement this connection
+    pass
+
+
+def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
+    '''
+    Contact the client to let the know the request ws rejected.
+    This is most often due to a budgeted amount being exceeded.
+    '''
+    # message the user
+    subject = '[CNAP] Pipeline request rejected'
+
+    plaintext_msg = '''
+        The pipeline request you have submitted was not accepted for the following
+        reason:
+        --------------------------------------------
+        %s
+        --------------------------------------------
+
+        The provided payment number was: %s
+
+        Please work with the QBRC to resolve this matter.
+
+    ''' % (rejection_reason, info_dict['ACCT_NUM'])
+
+    message_html = '''
+        <html>
+        <body>
+        <p>The pipeline request you have submitted was not accepted for the following
+        reason:</p>
+        <hr>
+        <p>%s</p>
+        <hr>
+        <p>The provided payment number was: %s</p>
+        </body>
+        </html>
+    ''' % (rejection_reason, info_dict['ACCT_NUM'])
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
+
+def handle_pipeline_request_email(info_dict):
+    '''
+    This is the starting point for business logic related to pipeline requests
+    info_dict is a dictionary of the information parsed from the email
+    '''
+
+    # first check if we recognize their email.  If not, let them know they need to register
+    try:
+        cnap_user = CnapUser.objects.get(email = info_dict['EMAIL'])
+    except CnapUser.DoesNotExist:
+        # let them know they have to register first
+        ask_requester_to_register_first(info_dict['EMAIL'])
+        return
+
+    # if the CnapUser exists, then they are already associated with *some* PI.  It is possible, however
+    # that there could be listing a different PI who we do not recognize (e.g. if they changed labs, but
+    # have the same email)
+    associated_research_groups = cnap_user.research_group
+    associated_pi_emails = [x.pi_email for x in associated_research_groups]
+    pi_email = info_dict['PI_EMAIL']
+    if not pi_email in associated_pi_emails:
+        # let them know they have to register with this PI
+        ask_requester_to_associate_with_pi_first(info_dict)
+        return
+
+    # if we are here, then we know about the user and they have correctly associated with their known PI.
+    # Check if they have an account string
+    if info_dict['HAVE_ACCT_NUM'].lower()[0] == 'n':
+        # send a message with cost info, etc.
+        handle_no_payment_number(info_dict)
+
+        # email QBRC indicating we have a request from a valid user/lab without acct string
+        inform_qbrc_of_request_without_payment_number(info_dict)
+        return
+
+    # allegedly have an account number from a valid user at this point.  Check that the acct string
+    # is indeed valid.
+    try:
+        payment_ref = Payment.objects.get(code=info_dict['ACCT_NUM'])
+    except Payment.DoesNotExist:
+        # the payment reference was not found.
+        # message the user, ask them to try again(?)
+        ask_user_to_resubmit_payment_info(info_dict)
+
+    # we now have a valid user + acct/payment.  We need to check that the payment is still
+    # valid-- could have exhausted a budget, etc.
+    is_valid_order, rejection_reason = check_that_purchase_is_valid_against_payment(info_dict, payment_ref)
+
+    # if the purchase was ok, create the project on CNAP and inform the user
+    if is_valid_order:
+        fill_order(info_dict, payment_ref)
+    else:
+        # if the purchase was NOT ok (expired PO, budget consumed, etc.), let the user know
+        inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason)
+
+    
+
+
+def process_emails(mail, id_list, request_type):
     '''
     Actually grabs the emails from the server
 
@@ -589,10 +1015,14 @@ def process_emails(mail, id_list):
     # slot in the tuple
     for uid, message in zip(id_list, messages[::2]):
         try:
-            info_dict = process_single_email(uid, message)
+            mail_body = get_email_body(uid, message)
 
-            # call the logic for account creation
-            handle_request_email(info_dict)
+            if request_type == ACCOUNT_REQUEST:
+                info_dict = parse_email_contents(mail_body, REQUIRED_ACCOUNT_CREATION_KEYS)
+                handle_account_request_email(info_dict)
+            elif request_type == PIPELINE_REQUEST:
+                info_dict = parse_email_contents(mail_body, REQUIRED_PIPELINE_CREATION_KEYS)
+                handle_pipeline_request_email(info_dict)
 
         except Exception as ex:
             # handle each email error individually.  This way a single
@@ -600,15 +1030,14 @@ def process_emails(mail, id_list):
             handle_exception(ex)
 
 
-
-def query_imap_server_for_ids(mail):
+def query_imap_server_for_ids(mail, subject):
     '''
     Queries IMAP server for messages.  Returns a list of integers which
     are unique IDs.
 
     Queries by searching for a matching subject
     '''
-    status, response = mail.search(None, '(TO "qbrc@hsph.harvard.edu") (SUBJECT "CNAP Account Request")')
+    status, response = mail.search(None, subject)
     if status != 'OK':
         raise MailQueryException('The mailbox search did not succeed.')
 
@@ -626,6 +1055,18 @@ def query_imap_server_for_ids(mail):
     except Exception as ex:
         raise MailQueryException('Could not parse the response from imap server: %s' % response)
 
+
+def get_account_creation_request_emails(mail):
+    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP-Pipeline]")'
+    id_list = query_imap_server_for_ids(mail, search_str)
+    return id_list
+
+
+def get_pipeline_request_emails(mail):
+    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP Account]")'
+    id_list = query_imap_server_for_ids(mail, search_str)
+    return id_list
+    
 
 def get_mailbox():
     '''
@@ -657,16 +1098,19 @@ def check_for_qualtrics_survey_results():
     application.
     '''
 
-    # if something fails during this block, just block future
     try:
         mail = get_mailbox()
-        id_list = query_imap_server_for_ids(mail)
-        unprocessed_uids = [uid for uid in id_list if is_new_email(settings.MAIL_HOST, settings.MAIL_FOLDER_NAME, uid)]
-        
-        # if we get here, then the connection and initial email query completed succesfully.
-        # The process_emails function handles exceptions on each email individually (and handles 
-        # those individual exceptions) so bad requests do not block potentiall valid ones
-        process_emails(mail, unprocessed_uids)
+
+        # work on the account request emails
+        account_creation_id_list = get_account_creation_request_emails(mail)
+        unprocessed_uids = [uid for uid in account_creation_id_list if is_new_email(settings.MAIL_HOST, settings.MAIL_FOLDER_NAME, uid)]
+        process_emails(mail, unprocessed_uids, ACCOUNT_REQUEST)
+
+        # work on the pipeline request emails
+        pipeline_creation_id_list = get_pipeline_request_emails(mail)
+        unprocessed_uids = [uid for uid in pipeline_creation_id_list if is_new_email(settings.MAIL_HOST, settings.MAIL_FOLDER_NAME, uid)]
+        process_emails(mail, unprocessed_uids, PIPELINE_REQUEST)
+
     except Exception as ex:
         # This should catch any exceptions raised prior to the point at which we
         # start processing individual emails
