@@ -19,7 +19,8 @@ from helpers.email_utils import notify_admins, send_email
 from main_app.models import ProcessedEmail, \
     ResearchGroup, \
     PendingUser, \
-    Organization
+    Organization, \
+    FinancialCoordinator
 
 
 class MailQueryException(Exception):
@@ -240,16 +241,12 @@ def send_account_confirmed_email_to_requester(p):
 
     send_email(plaintext_msg, message_html, requesting_user_email, subject)
 
-@task(name='pi_approve_pending_user')
-def pi_approve_pending_user(pending_user_pk):
-    '''
-    The PI has authorized the account.
-    '''
-    # get the PendingUser instance:
-    p = PendingUser.objects.get(pk=pending_user_pk)
-    info_dict = json.loads(p.info_json)
-    is_pi = p.is_pi
 
+def instantiate_new_research_group(info_dict):
+    '''
+    This is called following approval by the PI-- if the PI does not have an existing
+    ResearchGroup, then we end up here.
+    '''
     org = None
     if len(info_dict['ORGANIZATION']) > 0:
         org = Organization.objects.create(name = info_dict['ORGANIZATION'])
@@ -258,9 +255,24 @@ def pi_approve_pending_user(pending_user_pk):
     rg = ResearchGroup.objects.create(
         organization = org,
         pi_email = info_dict['PI_EMAIL'],
-        pi_name = '%s %s' % (info_dict['PI_FIRST_NAME'], info_dict['PI_LAST_NAME'])
+        pi_name = '%s %s' % (info_dict['PI_FIRST_NAME'], info_dict['PI_LAST_NAME']),
+        has_harvard_appointment = True if info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+        department = info_dict['DEPARTMENT'],
+        address_lines = info_dict['ADDRESS'],
+        city = info_dict['CITY'],
+        state = info_dict['STATE'],
+        postal_code = info_dict['POSTAL_CODE'],
+        country = info_dict['COUNTRY']
     )
     rg.save()
+
+    # create a financial contact
+    fc = FinancialCoordinator.objects.create(
+        contact_name = info_dict['FINANCIAL_CONTACT'],
+        contact_email = info_dict['FINANCIAL_EMAIL'],
+        research_group = rg
+    )
+    fc.save()
 
     # regardless of the request, create a user representing this PI:
     pi_user_obj = get_user_model().objects.create(
@@ -271,7 +283,27 @@ def pi_approve_pending_user(pending_user_pk):
     )
     pi_user_obj.save()
 
-    # if the request was made by someone other than the PI, also create a user
+
+@task(name='pi_approve_pending_user')
+def pi_approve_pending_user(pending_user_pk):
+    '''
+    The PI has authorized the account.  This function is directly called when a PI approves
+    an account, so it handles situations where the research group does not exist and situations
+    where new accounts are requested for an existing research group
+    '''
+    # get the PendingUser instance:
+    p = PendingUser.objects.get(pk=pending_user_pk)
+    info_dict = json.loads(p.info_json)
+    is_pi = p.is_pi
+
+    # does this group already exist?
+    group_exists = check_for_pi_account(info_dict)
+
+    # if the group does not exist, create it, including the PI
+    if not group_exists:
+        instantiate_new_research_group(info_dict)
+
+    # if the request was made by someone other than the PI, create a user
     # instance for that person
     if not is_pi:
         new_user_obj = get_user_model().objects.create(
@@ -287,9 +319,17 @@ def pi_approve_pending_user(pending_user_pk):
 
     # at this point we can remove the PendingUser:
     #TODO: do we delete, or mark 'invative'?
-    # How are we capturing the financial info???
     #p.delete()
 
+
+def add_approval_key_to_pending_user(pending_user_instance):
+    # generate a random key which will be used as part of the link sent to the PI.  When the PI clicks on that, it will
+    # allow us to reference the PendingUser obj
+    salt = uuid.uuid4().hex
+    s = (info_dict['PI_EMAIL'] + salt).encode('utf-8')
+    approval_key = hashlib.sha256(s).hexdigest()
+    p.approval_key = approval_key
+    p.save()
 
 
 @task(name='staff_approve_pending_user')
@@ -303,13 +343,8 @@ def staff_approve_pending_user(pending_user_pk):
     info_dict = json.loads(p.info_json)
     is_pi = p.is_pi
 
-    # generate a random key which will be used as part of the link sent to the PI.  When the PI clicks on that, it will
-    # allow us to reference the PendingUser obj
-    salt = uuid.uuid4().hex
-    s = (info_dict['PI_EMAIL'] + salt).encode('utf-8')
-    approval_key = hashlib.sha256(s).hexdigest()
-    p.approval_key = approval_key
-    p.save()
+    # generate an approval key:
+    add_approval_key_to_pending_user(p)
 
     # if it was a request by the PI, we simply let them know their request was approved.
     # Note that they still have to approve by clicking in an email-- otherwise anyone could spoof their PI
@@ -320,7 +355,7 @@ def staff_approve_pending_user(pending_user_pk):
     # get approval of the PI.  Send email to PI asking for approval and send email to client telling them 
     # that the request is pending their PI's approval.
     else:
-        send_approvail_email_to_pi(p)
+        send_approval_email_to_pi(p)
         send_account_pending_email_to_requester(p)
 
 
@@ -476,6 +511,33 @@ def handle_unknown_pi_account(info_dict, is_pi_request):
     inform_staff_of_new_account(p) 
 
 
+def inform_pi_of_existing_account(info_dict):
+    '''
+    This function is triggered if we receive an account request from the 
+    PI themself but we already know of them.  Simply remind them
+    '''
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    subject = '[CNAP] Duplicate account request received'
+    plaintext_msg = '''
+        A new account request for %s was received with your email
+        listed as the PI.  We already have an account
+        with that email, so no action has been performed.
+    ''' % domain
+
+    message_html = '''
+        <html>
+        <body>
+        <p>        
+        A new account request for %s was received with your email
+        listed as the PI.  We already have an account
+        with that email, so no action has been performed.</p>
+        </body>
+        </html>
+    ''' % domain
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
+
+
 def handle_request_email(info_dict):
     '''
     This contains our business logic for account creation.  info_dict
@@ -490,9 +552,24 @@ def handle_request_email(info_dict):
 
     pi_account_exists = check_for_pi_account(info_dict)
 
+    # this is a new PI- need to start the flow for new accounts
     if not pi_account_exists:
         handle_unknown_pi_account(info_dict, pi_request)
+    else: # the PI is known to us.  
+        if pi_request:
+            # if it's the PI trying again, just let them know we already have their records
+            inform_pi_of_existing_account(info_dict)
 
+        else:
+            # if it's NOT the PI, then it's someone trying to associate with an existing PI,
+            # such as a new postdoc.  We first ask for the PI to validate this activity
+            # We must first create a PendingUser and generate an approval key.
+            p = PendingUser.objects.create(is_pi = False, info_json = info_dict)
+            p.save()
+            add_approval_key_to_pending_user(p)
+
+            # now send the email with the confirmation link.
+            send_approval_email_to_pi(p)
     
 
 def process_emails(mail, id_list):

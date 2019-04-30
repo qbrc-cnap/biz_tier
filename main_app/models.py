@@ -77,7 +77,27 @@ class ResearchGroup(models.Model):
     # We allow the organization to be null
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, null=True)
 
-    
+    # does the PI have a Harvard appointment?
+    has_harvard_appointment = models.BooleanField(default=False)
+
+    # the department (e.g. Biostatistics).  Can be null since not always applicable
+    department = models.CharField(null=True)
+
+    # mailing address, etc.:
+    address_lines = models.CharField(max_length=200, null=True, blank=True)
+    city = models.CharField(max_length=50, null=True, blank=True)
+    state = models.Charfield(max_length=20, null=True, blank=True)
+    postal_code = models.Charfield(max_length=10, null=True, blank=True)
+    country = models.Charfield(max_length=100, null=True, blank=True)
+
+
+class FinancialCoordinator(models.Model):
+    '''
+    This keeps track of information about a ResearchGroup's finance coordinator
+    '''
+    contact_name = models.CharField(null=True, blank=True)
+    contact_email = models.EmailField(null=True, blank=True)
+    research_group = models.ForeignKey(ResearchGroup, on_delete=models.CASCADE)
 
 
 class Payment(models.Model):
@@ -111,6 +131,10 @@ class Payment(models.Model):
     # for each payment we create a code such that lab members can reference that code
     # during checkout and that will associate their purchase this payment
     code = models.CharField(max_length=20, blank=True, null=True)
+
+    # the amount of the payment:
+    # allow null for an open PO, or similar
+    payment_amount = models.FloatField(null=True)
 
 
 class CnapUser(models.Model):
