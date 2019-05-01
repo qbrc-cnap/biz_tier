@@ -153,6 +153,10 @@ MAIL_FOLDER_NAME = 'INBOX'
 
 # some dummy emails for testing purposes.  If an email function is invoked
 # with any of these emails, it will not actually try to send.
-TEST_EMAIL_ADDRESSES = ['foo@bar.com',]
+TEST_PI_EMAIL = 'pi_email@foo.com'
+TEST_ANOTHER_PI_EMAIL = 'another_pi_email@foo.com'
+TEST_POSTDOC_EMAIL = 'postdoc_email@foo.com'
+TEST_GRAD_STUDENT = 'grad_student@foo.com'
+TEST_EMAIL_ADDRESSES = [TEST_PI_EMAIL, TEST_POSTDOC_EMAIL, TEST_GRAD_STUDENT, TEST_ANOTHER_PI_EMAIL]
 
 QBRC_EMAIL = 'qbrc@hsph.harvard.edu'

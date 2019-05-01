@@ -16,5 +16,4 @@ urlpatterns = [
     path('', include(router.urls)),
     path('accounts/staff-approve/<int:pk>', views.StaffApprovalView.as_view(), name='staff_account_approval'),
     path('accounts/approve/<str:approval_key>', views.PIApprovalView.as_view(), name='pi_account_approval'),
-    path
 ]

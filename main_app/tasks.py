@@ -285,7 +285,6 @@ def instantiate_new_research_group(info_dict):
 
     # regardless of the request, create a user representing this PI:
     pi_user_obj = get_user_model().objects.create(
-        username = info_dict['PI_EMAIL'],
         first_name = info_dict['PI_FIRST_NAME'],
         last_name = info_dict['PI_LAST_NAME'],
         email = info_dict['PI_EMAIL']
@@ -294,10 +293,8 @@ def instantiate_new_research_group(info_dict):
 
     # above that created a regular Django user instance.  We also create a CnapUser instance, which
     # lets us associate the user with a research group
-    cnap_user = CnapUser.objects.create(
-        user=pi_user_obj,
-        research_group = rg
-    )
+    cnap_user = CnapUser.objects.create(user=pi_user_obj)
+    cnap_user.research_group.add(rg)
     cnap_user.save()
 
     return rg
@@ -334,7 +331,6 @@ def pi_approve_pending_user(pending_user_pk):
         except Exception:
             # a user with that email was not found.  Create a new basic user instance
             user_obj = get_user_model().objects.create(
-                username = info_dict['EMAIL'],
                 first_name = info_dict['FIRST_NAME'],
                 last_name = info_dict['LAST_NAME'],
                 email = info_dict['EMAIL']
@@ -343,10 +339,8 @@ def pi_approve_pending_user(pending_user_pk):
 
         # above that created or queried a regular Django user instance.  We also create a CnapUser instance, which
         # lets us associate the user with a research group
-        cnap_user = CnapUser.objects.create(
-            user=user_obj,
-            research_group = rg
-        )
+        cnap_user = CnapUser.objects.create(user=user_obj)
+        cnap_user.research_group.add(rg)
         cnap_user.save()
 
         # Let this user know their PI has approved the request.
@@ -360,11 +354,12 @@ def pi_approve_pending_user(pending_user_pk):
 def add_approval_key_to_pending_user(pending_user_instance):
     # generate a random key which will be used as part of the link sent to the PI.  When the PI clicks on that, it will
     # allow us to reference the PendingUser obj
+    info_dict = json.loads(pending_user_instance.info_json)
     salt = uuid.uuid4().hex
     s = (info_dict['PI_EMAIL'] + salt).encode('utf-8')
     approval_key = hashlib.sha256(s).hexdigest()
-    p.approval_key = approval_key
-    p.save()
+    pending_user_instance.approval_key = approval_key
+    pending_user_instance.save()
 
 
 @task(name='staff_approve_pending_user')
@@ -537,7 +532,7 @@ def handle_unknown_pi_account(info_dict, is_pi_request):
     # create a PendingUser:
     # Note that all the request info is placed into the info_json field, so we can
     # resolve the creation of regular users and PI later on
-    p = PendingUser.objects.create(is_pi = is_pi_request, info_json = info_dict)
+    p = PendingUser.objects.create(is_pi = is_pi_request, info_json = json.dumps(info_dict))
     p.save()
 
     # inform our staff about this request so we can review before allowing
@@ -577,7 +572,7 @@ def determine_if_existing_user(info_dict):
     Note that it looks at the 'base' user object. NOT the CnapUser
     '''
     try:
-        return get_user_model().objects.get(info_dict['EMAIL'])
+        return get_user_model().objects.get(email=info_dict['EMAIL'])
     except Exception as ex:
         return None
 
@@ -606,7 +601,7 @@ def handle_account_request_for_existing_user(info_dict, existing_user, pi_reques
         except CnapUser.DoesNotExist:
             # was not found, so the existing user was not previously associated with the existing
             # ResearchGroup.  Need to have the PI confirm this association.
-            p = PendingUser.objects.create(is_pi = False, info_json = info_dict)
+            p = PendingUser.objects.create(is_pi = False, info_json = json.dumps(info_dict))
             p.save()
             add_approval_key_to_pending_user(p)
 
@@ -624,7 +619,7 @@ def handle_account_request_for_new_user(info_dict, pi_request, research_group):
     else: # PI account exists
         # We first ask for the PI to validate this activity
         # We must first create a PendingUser and generate an approval key.
-        p = PendingUser.objects.create(is_pi = False, info_json = info_dict)
+        p = PendingUser.objects.create(is_pi = False, info_json = json.dumps(info_dict))
         p.save()
         add_approval_key_to_pending_user(p)
 
@@ -647,7 +642,6 @@ def handle_account_request_email(info_dict):
     # do we know of this user?  Whether the request was from a PI or a regular
     # user, this query is applicable.
     existing_user = determine_if_existing_user(info_dict)
-
     is_pi_str = info_dict['PI']
     if is_pi_str.lower()[0] == 'y':
         pi_request = True
@@ -1076,6 +1070,7 @@ def get_mailbox():
     try:
         mail = imaplib.IMAP4_SSL(settings.MAIL_HOST, settings.MAIL_PORT, ssl_context=context)
     except Exception as ex:
+        print('could not reach')
         raise MailQueryException('Could not reach imap server at %s:%d.  Reason was: %s' % (settings.MAIL_HOST, settings.MAIL_PORT, str(ex)))
     try:
         status, msg = mail.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)

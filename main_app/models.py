@@ -8,7 +8,13 @@ class BaseUser(AbstractUser):
     Declaring this here allows us the flexibility to add additional
     behavior at a later time.
     '''
-    pass
+    username = None
+    email = models.EmailField(unique=True, null=False, max_length=255)
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = []
+
+    def __str__(self):
+        return '%s, %s (%s)' % (self.last_name, self.first_name, self.email)
 
 
 class PendingUser(models.Model):
@@ -81,22 +87,22 @@ class ResearchGroup(models.Model):
     has_harvard_appointment = models.BooleanField(default=False)
 
     # the department (e.g. Biostatistics).  Can be null since not always applicable
-    department = models.CharField(null=True)
+    department = models.CharField(max_length=200, null=True)
 
     # mailing address, etc.:
     address_lines = models.CharField(max_length=200, null=True, blank=True)
     city = models.CharField(max_length=50, null=True, blank=True)
-    state = models.Charfield(max_length=20, null=True, blank=True)
-    postal_code = models.Charfield(max_length=10, null=True, blank=True)
-    country = models.Charfield(max_length=100, null=True, blank=True)
+    state = models.CharField(max_length=20, null=True, blank=True)
+    postal_code = models.CharField(max_length=10, null=True, blank=True)
+    country = models.CharField(max_length=100, null=True, blank=True)
 
 
 class FinancialCoordinator(models.Model):
     '''
     This keeps track of information about a ResearchGroup's finance coordinator
     '''
-    contact_name = models.CharField(null=True, blank=True)
-    contact_email = models.EmailField(null=True, blank=True)
+    contact_name = models.CharField(max_length=100, null=True, blank=True)
+    contact_email = models.EmailField(max_length=100, null=True, blank=True)
     research_group = models.ForeignKey(ResearchGroup, on_delete=models.CASCADE)
 
 
@@ -144,11 +150,11 @@ class Budget(models.Model):
     '''
 
     # the payment we are referencing
-    payment = models.ForeignKey(Paymemt, on_delete=models.CASCADE)
+    payment = models.ForeignKey(Payment, on_delete=models.CASCADE)
 
     # current_usage.  This is updated as purchases are made against the payment
     current_sum = models.FloatField(default=0.0)
-    
+
     
 class CnapUser(models.Model):
     '''
@@ -166,9 +172,6 @@ class CnapUser(models.Model):
 
     # when they joined
     join_date = models.DateField(auto_now_add = True)
-
-    class Meta:
-        unique_together = ('user','research_group')
 
 
 class Purchase(models.Model):
