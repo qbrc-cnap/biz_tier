@@ -613,7 +613,6 @@ def handle_account_request_for_new_user(info_dict, pi_request, research_group):
     '''
     If the user did not previously exist.  PI may or may not exist
     '''
-    
     if not research_group:
         handle_unknown_pi_account(info_dict, pi_request)
     else: # PI account exists
@@ -988,8 +987,6 @@ def handle_pipeline_request_email(info_dict):
     else:
         # if the purchase was NOT ok (expired PO, budget consumed, etc.), let the user know
         inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason)
-
-    
 
 
 def process_emails(mail, id_list, request_type):

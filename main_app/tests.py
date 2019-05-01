@@ -14,7 +14,9 @@ from main_app.tasks import MailQueryException, \
     MailParseException, \
     handle_account_request_email, \
     staff_approve_pending_user, \
-    pi_approve_pending_user
+    process_emails, \
+    pi_approve_pending_user, \
+    ACCOUNT_REQUEST
 
 from main_app.models import BaseUser, \
     ResearchGroup, \
@@ -152,6 +154,31 @@ class AccountRequestTestCase(TestCase):
             'FIRST_NAME': 'Jane',
             'LAST_NAME': 'Postdoc',
             'EMAIL': settings.TEST_POSTDOC_EMAIL,
+            'PHONE': '123-456-7890',
+            'PI': 'No',
+            'PI_FIRST_NAME': 'John',
+            'PI_LAST_NAME': 'Smith',
+            'PI_EMAIL': settings.TEST_PI_EMAIL,
+            'PI_PHONE': '123-456-7890',
+            'HARVARD_APPOINTMENT': 'Yes',
+            'ORGANIZATION': 'HSPH',
+            'DEPARTMENT': 'Biostatistics',
+            'FINANCIAL_CONTACT': '',
+            'FINANCIAL_EMAIL': '',
+            'ADDRESS': '',
+            'CITY': '',
+            'STATE': '',
+            'POSTAL_CODE': '',
+            'COUNTRY': ''
+        }
+
+        # this would be the info parsed from a regular
+        # user who is not a PI (a grad student)
+        # it is ok that the financial info is 'blank'
+        self.gradstudent_info_dict = {
+            'FIRST_NAME': 'Jim',
+            'LAST_NAME': 'Grad',
+            'EMAIL': settings.TEST_GRAD_STUDENT_EMAIL,
             'PHONE': '123-456-7890',
             'PI': 'No',
             'PI_FIRST_NAME': 'John',
@@ -686,8 +713,8 @@ class AccountRequestTestCase(TestCase):
         self.assertEqual(len(existing_cnap_users), 2)
         mock_send_account_confirmed_email_to_requester.assert_called_once()
 
-
-    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case2(self):
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
+    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case2(self, mock_send_account_confirmed_email_to_requester):
         '''
         Here we imagine having an existing lab with multiple users (i.e. some
         are NOT the PI).  A new user (e.g. postdoc) associates with them.  
@@ -695,9 +722,73 @@ class AccountRequestTestCase(TestCase):
         on the confirmation email.  Check that the new user (the one who made the request)
         is added to this existing group.
         '''
-        pass
+        # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
 
-    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case3(self):
+        # create a user who is a postdoc
+        postdoc_user = BaseUser.objects.create(
+            first_name = 'Jane',
+            last_name = 'Smith',
+            email = settings.TEST_POSTDOC_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+
+        # associate the regular user (the postdoc):
+        u2 = CnapUser.objects.create(user=postdoc_user)
+        u2.research_group.add(rg)
+        u2.save()
+
+        # confirm everything as expected prior to confirmation by the PI
+        # click
+        existing_rg = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_rg), 1)
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 2)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 2)
+
+        # create a PendingUser, consistent with a new user request  
+        p = PendingUser.objects.create(
+            is_pi = False, info_json = json.dumps(self.gradstudent_info_dict)
+        )
+
+        pi_approve_pending_user(p.pk)
+
+        # check that still have only 1 researchGroup,
+        # but that there are now two users:
+        existing_rg = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_rg), 1)
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 3)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 3)
+        mock_send_account_confirmed_email_to_requester.assert_called_once()
+
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
+    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case3(self, mock_send_account_confirmed_email_to_requester):
         '''
         Here we imagine having an existing lab with multiple users (i.e. some
         are NOT the PI).  A previously EXISTING user (e.g. postdoc from another lab) associates with them.  
@@ -707,18 +798,238 @@ class AccountRequestTestCase(TestCase):
         user...we only create a new CnapUser to establish the relationship between the 'base'
         user and this ResearchGroup  
         '''
-        pass
+        # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
 
-    def test_instantiation_of_research_group_creates_pi_as_cnap_user(self):
+        # create a user who is a postdoc
+        postdoc_user = BaseUser.objects.create(
+            first_name = 'Jane',
+            last_name = 'Smith',
+            email = settings.TEST_POSTDOC_EMAIL
+        )
+
+        # create a user who is a grad student
+        grad_user = BaseUser.objects.create(
+            first_name = 'Jim',
+            last_name = 'Grad',
+            email = settings.TEST_GRAD_STUDENT_EMAIL
+        )
+
+        # create the research group which will have the PI and grad student
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # create a research group for the old group the postdoc was
+        # associated with:
+        old_org = Organization.objects.create(name=self.old_pi_info_dict['ORGANIZATION'])
+        old_rg = ResearchGroup.objects.create(
+            organization = old_org,
+            pi_email = self.old_pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.old_pi_info_dict['PI_FIRST_NAME'], self.old_pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.old_pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.old_pi_info_dict['DEPARTMENT'],
+            address_lines = self.old_pi_info_dict['ADDRESS'],
+            city = self.old_pi_info_dict['CITY'],
+            state = self.old_pi_info_dict['STATE'],
+            postal_code = self.old_pi_info_dict['POSTAL_CODE'],
+            country = self.old_pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+
+        # associate the regular user (the grad student):
+        u2 = CnapUser.objects.create(user=grad_user)
+        u2.research_group.add(rg)
+        u2.save()
+
+        # associate the postdoc with their old lab:
+        u3 = CnapUser.objects.create(user=postdoc_user)
+        u3.research_group.add(old_rg)
+        u3.save()
+
+        # confirm everything as expected prior to confirmation by the PI
+        # click
+        existing_rg = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_rg), 2)
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 3)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 3)
+
+        # create a PendingUser, consistent with a new user request  
+        p = PendingUser.objects.create(
+            is_pi = False, info_json = json.dumps(self.postdoc_info_dict)
+        )
+
+        pi_approve_pending_user(p.pk)
+
+        # check that there are still only 2 groups, and 3 regular
+        # users, but now 4 cnap users
+        existing_rg = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_rg), 2)
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 3)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 4)
+        mock_send_account_confirmed_email_to_requester.assert_called_once()
+
+    @mock.patch('main_app.tasks.fetch_emails')
+    @mock.patch('main_app.tasks.get_email_body')
+    @mock.patch('main_app.tasks.inform_staff_of_new_account')
+    def test_full_account_request_case1(self, mock_inform_staff_of_new_account, mock_get_email_body, mock_fetch_emails):
         '''
-        Here we directly test that when we call the instantiate_new_research_group
-        function, we create the ResearchGroup, FinanceCoordinator, and PI
+        Technically not a "unit" test.  Tests the full set of operations following the
+        parsing of the email body until the email is sent to QBRC for approval
 
-        We need to create a 'base' user for the PI and also a CnapUser
+        This is for the case where we have a new user trying to register
+        with a new lab
         '''
-        pass
+        # does not matter what this is, except that it 
+        # has a length that is a multiple of 2
+        mock_fetch_emails.return_value = ['a','b']
+        mock_get_email_body.return_value = '''
+            <html>
+            <head>
+            <meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+            </head>
+            <body>
+            FIRST_NAME:Jane <br>
+            LAST_NAME:Postdoc <br>
+            EMAIL:%s <br>
+            PHONE:6171231234 <br>
+            PI: No <br>
+            PI_FIRST_NAME:Alice <br>
+            PI_LAST_NAME:Prof <br>
+            PI_EMAIL:%s <br>
+            PI_PHONE:6171231234 <br>
+            HARVARD_APPOINTMENT: <br>
+            ORGANIZATION:Harvard School of Public Health <br>
+            DEPARTMENT:Biostatistics <br>
+            FINANCIAL_CONTACT:John Money<br>
+            FINANCIAL_EMAIL:%s <br>
+            ADDRESS:677 Huntington Ave Bldg 2, R410 <br>
+            CITY:Boston <br>
+            STATE:MA <br>
+            POSTAL_CODE:02115 <br>
+            COUNTRY:United States
+            </body>
+            </html>
+        ''' % (settings.TEST_POSTDOC_EMAIL, settings.TEST_PI_EMAIL, settings.TEST_FINANCE_EMAIL)
+
+        # ensure we start from zero pending users
+        p = PendingUser.objects.all()
+        self.assertEqual(len(p), 0)
+
+        process_emails(None, [100,], ACCOUNT_REQUEST)
+
+        p = PendingUser.objects.all()
+        self.assertEqual(len(p), 1)
+        mock_inform_staff_of_new_account.assert_called_once()
+
+    @mock.patch('main_app.tasks.fetch_emails')
+    @mock.patch('main_app.tasks.get_email_body')
+    @mock.patch('main_app.tasks.send_approval_email_to_pi')
+    @mock.patch('main_app.tasks.send_account_pending_email_to_requester')
+    def test_full_account_request_case2(self, 
+        mock_send_account_pending_email_to_requester, 
+        mock_send_approval_email_to_pi,
+        mock_get_email_body, mock_fetch_emails):
+        '''
+        Technically not a "unit" test.  Tests the full set of operations following the
+        parsing of the email body until the email is sent to QBRC for approval
+
+        This is for the case where we have a new user trying to register
+        with an existing lab
+        '''
+        # does not matter what this is, except that it 
+        # has a length that is a multiple of 2
+        mock_fetch_emails.return_value = ['a','b']
+        mock_get_email_body.return_value = '''
+            <html>
+            <head>
+            <meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+            </head>
+            <body>
+            FIRST_NAME:Jane <br>
+            LAST_NAME:Postdoc <br>
+            EMAIL:%s <br>
+            PHONE:6171231234 <br>
+            PI: No <br>
+            PI_FIRST_NAME:Alice <br>
+            PI_LAST_NAME:Prof <br>
+            PI_EMAIL:%s <br>
+            PI_PHONE:6171231234 <br>
+            HARVARD_APPOINTMENT: <br>
+            ORGANIZATION:Harvard School of Public Health <br>
+            DEPARTMENT:Biostatistics <br>
+            FINANCIAL_CONTACT:John Money<br>
+            FINANCIAL_EMAIL:%s <br>
+            ADDRESS:677 Huntington Ave Bldg 2, R410 <br>
+            CITY:Boston <br>
+            STATE:MA <br>
+            POSTAL_CODE:02115 <br>
+            COUNTRY:United States
+            </body>
+            </html>
+        ''' % (settings.TEST_POSTDOC_EMAIL, settings.TEST_PI_EMAIL, settings.TEST_FINANCE_EMAIL)
 
 
+        # ensure we start from zero pending users
+        p = PendingUser.objects.all()
+        self.assertEqual(len(p), 0)
+
+        # create the lab:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create the research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those users with the research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+
+        # now that the lab exists, we initiate the process
+        process_emails(None, [100,], ACCOUNT_REQUEST)
+
+        p = PendingUser.objects.all()
+        self.assertEqual(len(p), 1)
+        mock_send_account_pending_email_to_requester.assert_called_once() 
+        mock_send_approval_email_to_pi.assert_called_once()
 
 class PipelineRequestTestCase(TestCase):
     '''
