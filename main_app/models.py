@@ -181,7 +181,7 @@ class Purchase(models.Model):
     user = models.ForeignKey(CnapUser, on_delete=models.CASCADE)
 
     # a purchase ID which we can link to the store
-    purchase_number = models.CharField(max_length=200, blank=False, null=False)
+    purchase_number = models.CharField(max_length=200, blank=True, null=True)
 
     issue_date = models.DateField(null=True, blank=True)
     close_date = models.DateField(null=True, blank=True)
