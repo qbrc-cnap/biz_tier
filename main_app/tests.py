@@ -19,7 +19,8 @@ from main_app.tasks import MailQueryException, \
     ACCOUNT_REQUEST, \
     handle_account_request_for_new_user, \
     handle_pipeline_request_email, \
-    ask_pipeline_requester_to_register_lab
+    ask_pipeline_requester_to_register_lab, \
+    check_that_purchase_is_valid_against_payment
 
 
 from main_app.models import BaseUser, \
@@ -28,7 +29,8 @@ from main_app.models import BaseUser, \
     CnapUser, \
     PendingUser, \
     FinancialCoordinator, \
-    Payment
+    Payment, \
+    Budget
 
 class EmailBodyParser(TestCase):
     def setUp(self):
@@ -1358,21 +1360,165 @@ class PipelineRequestTestCase(TestCase):
         mock_check_that_purchase_is_valid_against_payment.assert_called_once()
         mock_fill_order.assert_called_once()
 
-    def test_insufficient_funds_to_cover_requested_pipeline(self):
+    @mock.patch('main_app.tasks.calculate_total_purchase')
+    def test_insufficient_funds_to_cover_requested_pipeline(self, mock_calculate_total_purchase):
         '''
         This tests the case where the code is OK, but there is not
         enough balance left from the original payment.
+        '''
+        # to create a payment, we need to setup a researchGroup:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
 
-        We inform the user of this
-        '''
-        pass
+        # a payment was recorded for 100.00
+        p = Payment.objects.create(
+            client = rg,
+            code = '1234',
+            payment_amount = 100.00
+        )
 
-    def test_pipeline_request_adds_to_balance(self):
+        # make some charges against that payment (i.e. prior purchases)
+        b = Budget.objects.create(
+            payment = p,
+            current_sum = 80.00
+        )
+
+        #mock that the total cost of this pipeline request will
+        # exceed the initial payment when added to the prior purchases
+        mock_calculate_total_purchase.return_value = 40.00
+
+        is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
+        self.assertFalse(is_valid)
+
+    @mock.patch('main_app.tasks.calculate_total_purchase')
+    def test_sufficient_funds_to_cover_requested_pipeline(self, mock_calculate_total_purchase):
         '''
-        Here we test that a pipeline request subsequently reduces the
-        remaining balance from a payment that was made.  
+        This tests the case where the code is OK and there is enough budget left over
+        to cover this project
         '''
-        pass
+        # to create a payment, we need to setup a researchGroup:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # a payment was recorded for 100.00
+        p = Payment.objects.create(
+            client = rg,
+            code = '1234',
+            payment_amount = 100.00
+        )
+
+        # make some charges against that payment (i.e. prior purchases)
+        b = Budget.objects.create(
+            payment = p,
+            current_sum = 80.00
+        )
+        budget_pk = b.pk
+
+        #mock that the total cost of this pipeline request will
+        # NOT exceed the initial payment when added to the prior purchases
+        mock_calculate_total_purchase.return_value = 10.00
+
+        is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
+        self.assertTrue(is_valid)
+
+        # check that the budget was updated:
+        updated_budget = Budget.objects.get(pk=budget_pk)
+        self.assertEqual(updated_budget.current_sum, 90.00)
+
+
+    @mock.patch('main_app.tasks.calculate_total_purchase')
+    def test_pipeline_creates_new_budget_item(self, mock_calculate_total_purchase):
+        '''
+        Here we test that a pipeline request subsequently creates a Budget
+        instance so we can track charges against an initial payment 
+        '''
+        # to create a payment, we need to setup a researchGroup:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # a payment was recorded for 100.00
+        p = Payment.objects.create(
+            client = rg,
+            code = '1234',
+            payment_amount = 100.00
+        )
+
+        #mock that the total cost of this pipeline request will
+        # NOT exceed the initial payment when added to the prior purchases
+        mock_calculate_total_purchase.return_value = 20.00
+
+        is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
+        self.assertTrue(is_valid)
+
+        # check that the budget was created and has the proper amount:
+        budget = Budget.objects.get(payment=p)
+        self.assertEqual(budget.current_sum, 20.00)
+
+    @mock.patch('main_app.tasks.calculate_total_purchase')
+    def test_open_payment_scheme_allows_purchase(self, mock_calculate_total_purchase):
+        '''
+        Here we test that a payment with an amount of NULL allows purchases to be made
+        '''
+        # to create a payment, we need to setup a researchGroup:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # a payment which does not specify an amount
+        p = Payment.objects.create(
+            client = rg,
+            code = '1234',
+        )
+
+        #mock that the total cost of this pipeline request
+        mock_calculate_total_purchase.return_value = 2000.00
+
+        is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
+        self.assertTrue(is_valid)
+
 
     def test_pipeline_request_for_open_po_works(self):
         '''
