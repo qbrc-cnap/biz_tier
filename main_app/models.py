@@ -195,7 +195,7 @@ class Product(models.Model):
     # a unique product ID is implied with the primary key
 
     # a name for the product:
-    name = models.CharField(max_length=1000, blank=False, null=False)
+    name = models.CharField(max_length=1000, unique=True, blank=False, null=False)
 
     # a verbose description, allowed to be empty:
     description = models.CharField(max_length=5000, blank=True, null=True)
@@ -206,9 +206,11 @@ class Product(models.Model):
     # than that amount
     quantity = models.PositiveIntegerField(null=True)
 
-    # a boolean to track whether the product is effectively unlimited
+    # a boolean to track whether the product is effectively unlimited in
+    # terms of stock
     # If True, then a limit is imposed and need to check the quantity field
     # By default, it is False, which creates unlimited quantity of a product
+    # For lab-specific products, we can limit the quantity
     is_quantity_limited = models.BooleanField(default=False)
 
     # the primary key of the workflow from the actual CNAP application.  This

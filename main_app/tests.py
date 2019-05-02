@@ -20,7 +20,12 @@ from main_app.tasks import MailQueryException, \
     handle_account_request_for_new_user, \
     handle_pipeline_request_email, \
     ask_pipeline_requester_to_register_lab, \
-    check_that_purchase_is_valid_against_payment
+    check_that_purchase_is_valid_against_payment, \
+    InventoryException, \
+    calculate_total_purchase, \
+    ProductDoesNotExistException, \
+    handle_no_payment_number, \
+    fill_order
 
 
 from main_app.models import BaseUser, \
@@ -30,7 +35,10 @@ from main_app.models import BaseUser, \
     PendingUser, \
     FinancialCoordinator, \
     Payment, \
-    Budget
+    Budget, \
+    Product, \
+    Order, \
+    Purchase
 
 class EmailBodyParser(TestCase):
     def setUp(self):
@@ -1519,17 +1527,278 @@ class PipelineRequestTestCase(TestCase):
         is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
         self.assertTrue(is_valid)
 
-
-    def test_pipeline_request_for_open_po_works(self):
+    def test_total_purchase_calculation(self):
         '''
-        If a payment amount is left null that indicates we have an open
-        PO or some other "unlimited" payment scheme setup.  Thus,
-        requests referencing the proper code should not be limited in any
-        way.
+        This tests that we get the correct purchase amount
         '''
-        pass
-    
+        # create a product:
+        product = Product.objects.create(
+            name = 'some pipeline',
+            is_quantity_limited = False,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
 
+        info_dict = {
+            'PIPELINE': 'some pipeline',
+            'NUM_OF_SAMPLE': 6
+        }
+
+        total_cost = calculate_total_purchase(info_dict)
+        self.assertEqual(total_cost, 60.00)
+
+    @mock.patch('main_app.tasks.inform_qbrc_of_bad_pipeline_request')
+    def test_bad_product_name_informs_qbrc(self, mock_inform_qbrc_of_bad_pipeline_request):
+        '''
+        This tests the case where the survey results go out of sync
+        with our pipeline offerings and someone requests a pipeline
+        that we cannot find in our database.
+        '''
+        # create a product:
+        product = Product.objects.create(
+            name = 'some pipeline',
+            quantity = 5,
+            is_quantity_limited = True,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
+
+        info_dict = {
+            'PIPELINE': 'other pipeline',
+            'NUM_OF_SAMPLE': 6
+        }
+
+        with self.assertRaises(ProductDoesNotExistException):
+            calculate_total_purchase(info_dict)
+        mock_inform_qbrc_of_bad_pipeline_request.assert_called_once()
+
+
+    def test_inventory_exhausted_generates_exception(self):
+        '''
+        This tests that the function for calculating the total cost
+        raises an exception if the order exceeds our inventory
+        '''
+        # create a product:
+        product = Product.objects.create(
+            name = 'some pipeline',
+            quantity = 5,
+            is_quantity_limited = True,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
+
+        info_dict = {
+            'PIPELINE': 'some pipeline',
+            'NUM_OF_SAMPLE': 6
+        }
+
+        with self.assertRaises(InventoryException):
+            calculate_total_purchase(info_dict)
+
+
+
+    @mock.patch('main_app.tasks.send_inventory_alert_to_qbrc')
+    @mock.patch('main_app.tasks.send_inventory_alert_to_requester')
+    def test_inventory_exhausted_handling_case1(self, 
+        mock_send_inventory_alert_to_requester,
+        mock_send_inventory_alert_to_qbrc):
+        '''
+        This tests the case where a quantity-limited order is placed
+        and that order exceeds our inventory
+
+        This is for the case where they have not provided an account number
+        '''
+        # create a product:
+        product = Product.objects.create(
+            name = 'some pipeline',
+            quantity = 5,
+            is_quantity_limited = True,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
+
+        info_dict = {
+            'PIPELINE': 'some pipeline',
+            'NUM_OF_SAMPLE': 6
+        }
+
+        handle_no_payment_number(info_dict)
+        mock_send_inventory_alert_to_requester.assert_called_once()
+        mock_send_inventory_alert_to_qbrc.assert_called_once()
+
+
+    @mock.patch('main_app.tasks.send_inventory_alert_to_qbrc')
+    @mock.patch('main_app.tasks.inform_user_of_invalid_order')
+    def test_inventory_exhausted_handling_case2(self, 
+        mock_inform_user_of_invalid_order,
+        mock_send_inventory_alert_to_qbrc):
+        '''
+        This tests the case where a quantity-limited order is placed
+        and that order exceeds our inventory
+
+        This is for the case where they DID provide an accout
+        '''
+        # create a product:
+        product = Product.objects.create(
+            name = 'some pipeline',
+            quantity = 5,
+            is_quantity_limited = True,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
+
+        info_dict = {
+            'PIPELINE': 'some pipeline',
+            'NUM_OF_SAMPLE': 6
+        }
+
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # a payment which does not specify an amount
+        p = Payment.objects.create(
+            client = rg,
+            code = '1234',
+        )
+
+        is_valid, rejection_reason = check_that_purchase_is_valid_against_payment(info_dict, p)
+        self.assertFalse(is_valid)
+        mock_send_inventory_alert_to_qbrc.assert_called_once()
+
+    @mock.patch('main_app.tasks.inform_qbrc_of_bad_pipeline_request')
+    @mock.patch('main_app.tasks.inform_user_of_invalid_order')
+    def test_bad_product_request_lets_user_and_qbrc_know(self, 
+        mock_inform_user_of_invalid_order,
+        mock_inform_qbrc_of_bad_pipeline_request):
+        '''
+        This tests the case where a quantity-limited order is placed
+        and that order exceeds our inventory
+
+        This is for the case where they DID provide an accout
+        '''
+        # create a product:
+        product = Product.objects.create(
+            name = 'some pipeline',
+            quantity = 5,
+            is_quantity_limited = True,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
+
+        info_dict = {
+            'PIPELINE': 'other pipeline',
+            'NUM_OF_SAMPLE': 6
+        }
+
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # a payment which does not specify an amount
+        p = Payment.objects.create(
+            client = rg,
+            code = '1234',
+        )
+
+        is_valid, rejection_reason = check_that_purchase_is_valid_against_payment(info_dict, p)
+        self.assertFalse(is_valid)
+        mock_inform_qbrc_of_bad_pipeline_request.assert_called_once()
+
+    @mock.patch('main_app.tasks.create_project_on_cnap')
+    def test_valid_order_creates_proper_objects(self, mock_create_project_on_cnap):
+        '''
+        Test that all the proper things are created when we finally fill an order
+        '''
+
+        # create a regular user:
+        regular_user = get_user_model().objects.create(
+            first_name = 'Jane',
+            last_name = 'Postdoc',
+            email = settings.TEST_POSTDOC_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those users with the research group:
+        u = CnapUser.objects.create(user=regular_user)
+        u.research_group.add(rg)
+        u.save()
+
+        # create the payment:
+        payment = Payment.objects.create(
+            client = rg,
+            code = '1234'
+        )
+
+        product = Product.objects.create(
+            name = 'some pipeline',
+            quantity = 25,
+            is_quantity_limited = True,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
+        pk = product.pk
+
+        info_dict = {
+            'PIPELINE': 'some pipeline',
+            'NUM_OF_SAMPLE': 6,
+            'EMAIL': settings.TEST_POSTDOC_EMAIL,
+            'PI_EMAIL': settings.TEST_PI_EMAIL,
+        }
+
+        #prior to calling function, see that we have no orders, etc.:
+        existing_purchases = Purchase.objects.all()
+        self.assertEqual(len(existing_purchases), 0)
+        existing_orders = Order.objects.all()
+        self.assertEqual(len(existing_orders), 0)
+
+        fill_order(info_dict, payment)
+
+        # check that a purchase and order were created
+        existing_purchases = Purchase.objects.all()
+        self.assertEqual(len(existing_purchases), 1)
+        existing_orders = Order.objects.all()
+        self.assertEqual(len(existing_orders), 1)
+
+        # check that quantity of product was decreased
+        updated_product = Product.objects.get(pk=pk)
+        self.assertEqual(updated_product.quantity, 19)
+
+        mock_create_project_on_cnap.assert_called_once()
 
 class QualtricsSurveyTestCase(TestCase):
     '''

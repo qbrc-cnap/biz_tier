@@ -23,7 +23,10 @@ from main_app.models import ProcessedEmail, \
     FinancialCoordinator, \
     CnapUser, \
     Payment, \
-    Budget
+    Budget, \
+    Product, \
+    Order, \
+    Purchase
 
 class MailQueryException(Exception):
     pass
@@ -32,6 +35,12 @@ class MailQueryWarning(Exception):
     pass
 
 class MailParseException(Exception):
+    pass
+
+class InventoryException(Exception):
+    pass
+
+class ProductDoesNotExistException(Exception):
     pass
 
 
@@ -771,7 +780,32 @@ def inform_qbrc_of_request_without_payment_number(info_dict):
         <hr>
         </body>
         </html>
-    ''' % json.dumps(user_info)
+    ''' % json.dumps(info_dict)
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
+
+
+def inform_qbrc_of_bad_pipeline_request(info_dict):
+
+    subject = '[CNAP] Pipeline request received for unknown pipeline'
+    plaintext_msg = '''
+        A new pipeline request was received that specified an unrecognized pipeline:
+        -------------------------------------
+        %s
+        -------------------------------------
+    ''' % json.dumps(info_dict)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>A new pipeline request was received that specified an unrecognized pipeline:</p>
+        <hr>
+        <pre>
+        %s
+        </pre>
+        <hr>
+        </body>
+        </html>
+    ''' % json.dumps(info_dict)
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
 
 
@@ -780,7 +814,109 @@ def calculate_total_purchase(info_dict):
     This calculates the total cost of a particular purchase and returns
     that number
     '''
-    pass
+    pipeline = info_dict['PIPELINE']
+    quantity_ordered = int(info_dict['NUM_OF_SAMPLE'])
+
+    # go find the product corresponding to this pipeline:
+    try:
+        product = Product.objects.get(name=pipeline)
+    except Product.DoesNotExist:
+        inform_qbrc_of_bad_pipeline_request(info_dict)
+        raise ProductDoesNotExistException('')
+
+    # should also check if this is limited in any way
+    if product.is_quantity_limited:
+        qty_available = product.quantity
+        if quantity_ordered > qty_available:
+            raise InventoryException('The quantity ordered (%d) was greater than the number available')
+    # if we make it here, we either have unlimited product or the quantity ordered
+    # was OK given our inventory
+    return quantity_ordered*product.unit_cost
+
+
+def send_inventory_alert_to_requester(info_dict):
+    '''
+    Lets the requester know that their request exceeded our inventory
+    '''    
+    subject = '[CNAP] Your pipeline request'
+
+    plaintext_msg = '''
+        This email is to let you know that your pipeline request was denied since the order exceeded
+        our available inventory.  Please contact the QBRC to resolve this issue.
+        - QBRC staff
+    '''
+
+    message_html = '''
+        <html>
+        <body>
+        <p>
+        This email is to let you know that your pipeline request was denied since the order exceeded
+        our available inventory.  Please contact the QBRC to resolve this issue.
+        </p>
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    '''
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
+
+def send_inventory_alert_to_qbrc(info_dict):
+    '''
+    Lets the QBRC know that someone has requested a pipeline that has
+    exceeded our inventory
+    '''
+
+    subject = '[CNAP] Pipeline request-- inventory issue'
+    plaintext_msg = '''
+        A new pipeline request was received which exceeded our inventory:
+        -------------------------------------
+        %s
+        -------------------------------------
+    ''' % json.dumps(info_dict)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>A new pipeline request was received which exceeded our inventory:</p>
+        <hr>
+        <pre>
+        %s
+        </pre>
+        <hr>
+        </body>
+        </html>
+    ''' % json.dumps(info_dict)
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
+
+
+def general_alert_to_requester(info_dict):
+    '''
+    A general alert sent to the pipeline requester
+    '''    
+    subject = '[CNAP] Your pipeline request'
+
+    plaintext_msg = '''
+        This email is to let you know that your pipeline request was denied due to an unexpected
+        problem.  We are working to resolve this and will be in contact.
+        - QBRC staff
+    '''
+
+    message_html = '''
+        <html>
+        <body>
+        <p>
+        This email is to let you know that your pipeline request was denied due to an unexpected
+        problem.  We are working to resolve this and will be in contact.
+        </p>
+
+        <p>QBRC staff</p>
+        </body>
+        </html>
+    '''
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
 def handle_no_payment_number(info_dict):
     '''
@@ -788,9 +924,18 @@ def handle_no_payment_number(info_dict):
     we end up here.
     '''
     # prepare some cost estimate:
-    total_cost = calculate_total_purchase(info_dict)
+    try:
+        total_cost = calculate_total_purchase(info_dict)
+    except InventoryException as ex:
+        send_inventory_alert_to_requester(info_dict)
+        send_inventory_alert_to_qbrc(info_dict)
+        return
+    except ProductDoesNotExistException as ex:
+        general_alert_to_requester(info_dict)
+        return
 
-    # message the user
+    # message the user if we have made it this far-- the request
+    # is otherwise fine
     subject = '[CNAP] Pipeline request-- more information needed'
 
     plaintext_msg = '''
@@ -867,7 +1012,13 @@ def check_that_purchase_is_valid_against_payment(info_dict, payment_ref):
     The second gives a string, which can inform the user what was wrong
     with their purchase
     '''
-    total_cost = calculate_total_purchase(info_dict)
+    try:
+        total_cost = calculate_total_purchase(info_dict)
+    except InventoryException as ex:
+        send_inventory_alert_to_qbrc(info_dict)
+        return (False, 'The requested order exceeded our inventory')
+    except ProductDoesNotExistException as ex:
+        return (False, 'An unexpected error occurred processing the order.  We are working to resolve this.')
 
     try:
         budget = Budget.objects.get(payment=payment_ref)
@@ -897,13 +1048,61 @@ def check_that_purchase_is_valid_against_payment(info_dict, payment_ref):
         return (True, None)
 
 
+def create_project_on_cnap(order_obj):
+    '''
+    This handles the actual work of contacting CNAP to generate a new project
+    '''
+    pass
+
+
 def fill_order(info_dict, payment_ref):
     '''
     Contacts CNAP to create a project
-    '''
-    #TODO: implement this connection
-    pass
 
+    At this point the payment, product choice, etc. 
+    are all OK.  Just need to formally enter everything into the database
+    '''
+
+    pipeline = info_dict['PIPELINE']
+    quantity_ordered = int(info_dict['NUM_OF_SAMPLE'])
+
+    # go find the product corresponding to this pipeline:
+    product = Product.objects.get(name=pipeline)
+
+    # get the CnapUser instance
+    base_user = get_user_model().objects.get(email=info_dict['EMAIL'])
+
+    # get the research group:
+    rg = ResearchGroup.objects.get(pi_email = info_dict['PI_EMAIL'] )
+
+    cnap_user = CnapUser.objects.get(user=base_user, research_group=rg)
+
+    # make a purchase:
+    purchase = Purchase.objects.create(
+        user = cnap_user
+    )
+    # create a new Order:
+    order_obj = Order.objects.create(
+        product = product,
+        purchase = purchase,
+        quantity = quantity_ordered,
+        order_filled = False # until the project has successfully been created, leave F
+    ) 
+
+    # if this is a quantity-limited product, can now remove it from our inventory
+    if product.is_quantity_limited:
+        new_quantity = product.quantity - quantity_ordered
+        product.quantity = new_quantity
+        product.save()
+
+    # contact CNAP to create the project
+    create_project_on_cnap(order_obj)
+
+    # if the prior function succeeded, then the order was filled
+    order_obj.order_filled = True
+    order_obj.save()
+
+    # CNAP handles sending email to the requester.
 
 def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
     '''
@@ -1042,6 +1241,7 @@ def handle_pipeline_request_email(info_dict):
     else:
         # if the purchase was NOT ok (expired PO, budget consumed, etc.), let the user know
         inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason)
+
 
 def process_emails(mail, id_list, request_type):
     '''
