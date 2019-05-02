@@ -260,6 +260,41 @@ def send_account_confirmed_email_to_requester(pending_user_instance):
     send_email(plaintext_msg, message_html, requesting_user_email, subject)
 
 
+def send_account_confirmed_email_to_qbrc(pending_user_instance):
+    '''
+    This sends a message to the QBRC once
+    the PI has approved the request
+    ''' 
+    user_info = json.loads(pending_user_instance.info_json)
+    pi_email = user_info['PI_EMAIL']
+    subject = '[CNAP] New account created'
+    requesting_user_email = user_info['EMAIL']
+
+    plaintext_msg = '''
+        The following account has been approved by the PI (%s):
+
+        %s %s (%s)
+        - QBRC staff
+    ''' % (pi_email, user_info['FIRST_NAME'], user_info['LAST_NAME'], requesting_user_email)
+
+    message_html = '''
+        <html>
+        <body>
+        <p>
+        The following account has been approved by the PI (%s):
+        </p>
+        <hl>
+        <p>
+        %s %s (%s)
+        </p>
+        <hl>
+        </body>
+        </html>
+    ''' % (pi_email, user_info['FIRST_NAME'], user_info['LAST_NAME'], requesting_user_email)
+
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
+
+
 def instantiate_new_research_group(info_dict):
     '''
     This is called following approval by the PI-- if the PI does not have an existing
@@ -363,6 +398,9 @@ def pi_approve_pending_user(pending_user_pk):
 
             # Let this user know their PI has approved the request.
             send_account_confirmed_email_to_requester(p)
+
+            # Let the QBRC know we have a new account confirmed:
+            send_account_confirmed_email_to_qbrc(p)
 
     # at this point we can remove the PendingUser:
     #TODO: do we delete, or mark 'invative'?
