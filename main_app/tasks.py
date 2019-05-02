@@ -175,7 +175,7 @@ def send_approval_email_to_pi(pending_user_instance):
     send_email(plaintext_msg, message_html, pi_email, subject)
 
 
-def send_account_pending_email_to_requester(p):
+def send_account_pending_email_to_requester(pending_user_instance):
     '''
     This sends a message to a user who has requested an account, but lists someone
     else as the PI.  We let them know that the PI has to still approve
@@ -216,7 +216,7 @@ def send_account_pending_email_to_requester(p):
     send_email(plaintext_msg, message_html, requesting_user_email, subject)
 
 
-def send_account_confirmed_email_to_requester(p):
+def send_account_confirmed_email_to_requester(pending_user_instance):
     '''
     This sends a message to a user who has requested an account once
     the PI has approved the request
@@ -339,12 +339,21 @@ def pi_approve_pending_user(pending_user_pk):
 
         # above that created or queried a regular Django user instance.  We also create a CnapUser instance, which
         # lets us associate the user with a research group
-        cnap_user = CnapUser.objects.create(user=user_obj)
-        cnap_user.research_group.add(rg)
-        cnap_user.save()
+        # First see if this association has already been made, perhaps through repeated requests
+        # and the failure of the PI to confirm in a timely fashion
+        try:
+            CnapUser.objects.get(user=user_obj, research_group = rg)
+            # if we are here, then the CnapUser already existed and we do nothing.
+            # The only conceivable way to get here is if someone issues multiple account
+            # requests (thus sending the PI multiple requests) and then the PI confirms
+            # all of those requests.
+        except CnapUser.DoesNotExist:
+            cnap_user = CnapUser.objects.create(user=user_obj)
+            cnap_user.research_group.add(rg)
+            cnap_user.save()
 
-        # Let this user know their PI has approved the request.
-        send_account_confirmed_email_to_requester(p)
+            # Let this user know their PI has approved the request.
+            send_account_confirmed_email_to_requester(p)
 
     # at this point we can remove the PendingUser:
     #TODO: do we delete, or mark 'invative'?
@@ -933,6 +942,40 @@ def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
 
+def ask_pipeline_requester_to_register_lab(info_dict):
+    '''
+    We use this function when a known user requests a pipeline
+    but gives a PI we do not know of.  The PI is completely new to us,
+    NOT a case where the user has to simply associate with that PI
+    '''
+    subject = '[CNAP] Please register your group first'
+
+    plaintext_msg = '''
+        The pipeline request you have submitted was not accepted since the PI
+        you listed (%s) was not recognized.  If this was a simple typing error,
+        please try again.  
+
+        If the email you entered was correct, we first need to register
+        this new principal investigator with our system.  
+
+    ''' % (info_dict['PI_EMAIL'])
+
+    message_html = '''
+        <html>
+        <body>
+        <p>The pipeline request you have submitted was not accepted since the PI
+        you listed (%s) was not recognized.  If this was a simple typing error,
+        please try again.  
+        </p>
+        <p>
+        If the email you entered was correct, we first need to register
+        this new principal investigator with our system. </p>
+        </body>
+        </html>
+    ''' % (rejection_reason, info_dict['ACCT_NUM'])
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
 def handle_pipeline_request_email(info_dict):
     '''
     This is the starting point for business logic related to pipeline requests
@@ -941,20 +984,31 @@ def handle_pipeline_request_email(info_dict):
 
     # first check if we recognize their email.  If not, let them know they need to register
     try:
-        cnap_user = CnapUser.objects.get(email = info_dict['EMAIL'])
-    except CnapUser.DoesNotExist:
+        base_user = get_user_model().objects.get(email = info_dict['EMAIL'])
+    except get_user_model().DoesNotExist as ex:
         # let them know they have to register first
         ask_requester_to_register_first(info_dict['EMAIL'])
         return
 
-    # if the CnapUser exists, then they are already associated with *some* PI.  It is possible, however
-    # that there could be listing a different PI who we do not recognize (e.g. if they changed labs, but
-    # have the same email)
-    associated_research_groups = cnap_user.research_group
-    associated_pi_emails = [x.pi_email for x in associated_research_groups]
-    pi_email = info_dict['PI_EMAIL']
-    if not pi_email in associated_pi_emails:
-        # let them know they have to register with this PI
+    # if they are here, we at least know of their email.
+    try:
+        # check the PI email to see if their group is known to us.
+        # it is possible they worked with a different lab previously
+        # and have not associated their old email with their new lab
+        rg = ResearchGroup.objects.get(pi_email=info_dict['PI_EMAIL'])
+    except ResearchGroup.DoesNotExist:
+        # so we know of the user, but not their PI
+        # let them know they need to register with the new lab
+        ask_pipeline_requester_to_register_lab(info_dict)
+        return
+
+    # if we make it here, they have correctly input their own email
+    # and the email of a PI we know about.  They STILL might not be associated
+    # with each other, so check that here
+    try:
+        cnap_user = CnapUser.objects.get(user=base_user, research_group=rg)
+    except CnapUser.DoesNotExist:
+        # let them know they have to register first
         ask_requester_to_associate_with_pi_first(info_dict)
         return
 
@@ -976,6 +1030,7 @@ def handle_pipeline_request_email(info_dict):
         # the payment reference was not found.
         # message the user, ask them to try again(?)
         ask_user_to_resubmit_payment_info(info_dict)
+        return
 
     # we now have a valid user + acct/payment.  We need to check that the payment is still
     # valid-- could have exhausted a budget, etc.
@@ -987,7 +1042,6 @@ def handle_pipeline_request_email(info_dict):
     else:
         # if the purchase was NOT ok (expired PO, budget consumed, etc.), let the user know
         inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason)
-
 
 def process_emails(mail, id_list, request_type):
     '''

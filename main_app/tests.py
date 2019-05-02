@@ -16,14 +16,19 @@ from main_app.tasks import MailQueryException, \
     staff_approve_pending_user, \
     process_emails, \
     pi_approve_pending_user, \
-    ACCOUNT_REQUEST
+    ACCOUNT_REQUEST, \
+    handle_account_request_for_new_user, \
+    handle_pipeline_request_email, \
+    ask_pipeline_requester_to_register_lab
+
 
 from main_app.models import BaseUser, \
     ResearchGroup, \
     Organization, \
     CnapUser, \
     PendingUser, \
-    FinancialCoordinator
+    FinancialCoordinator, \
+    Payment
 
 class EmailBodyParser(TestCase):
     def setUp(self):
@@ -274,7 +279,8 @@ class AccountRequestTestCase(TestCase):
         '''
         If we have an existing user, but there is no research group.  This might be the 
         case if we had a user who was previously with one lab.  They then change to a 
-        new lab where the PI has NOT previously worked with us.  Thus, the postdoc is known
+        new lab where the PI has NOT previously worked with us.  Thus, the postdoc is known, if they reach that point in the code, so
+        it's not likely to be malicious content
         to us, but their PI does NOT have an account
 
         Check that we call the handle_unknown_pi_account function
@@ -524,58 +530,6 @@ class AccountRequestTestCase(TestCase):
         pk = p[0].pk
         staff_approve_pending_user(pk)
         mock_send_self_approval_email_to_pi.assert_called_once()
-
-    @mock.patch('main_app.tasks.send_approval_email_to_pi')
-    @mock.patch('main_app.tasks.send_account_pending_email_to_requester')
-    def test_staff_approval_for_regular_user_request(self, 
-        mock_send_account_pending_email_to_requester, 
-        mock_send_approval_email_to_pi
-        ):
-        '''
-        Here we test that the activity once the QBRC has approved a request submitted
-        by a regular user for a given lab
-
-        Test that the PI is sent a confirmation email and the regular 
-        user gets an info email.
-
-        Also check that we do not (yet!) create any ResearchGroup and new user
-        instances
-        '''
-        # create a user who is a PI:
-        pi_user = BaseUser.objects.create(
-            first_name = 'John',
-            last_name = 'Doe',
-            email = settings.TEST_PI_EMAIL
-        )
-
-        # create their research group:
-        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
-        rg = ResearchGroup.objects.create(
-            organization = org,
-            pi_email = self.pi_info_dict['PI_EMAIL'],
-            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
-            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
-            department = self.pi_info_dict['DEPARTMENT'],
-            address_lines = self.pi_info_dict['ADDRESS'],
-            city = self.pi_info_dict['CITY'],
-            state = self.pi_info_dict['STATE'],
-            postal_code = self.pi_info_dict['POSTAL_CODE'],
-            country = self.pi_info_dict['COUNTRY']
-        )
-
-        # associate those PI with their research group:
-        u1 = CnapUser.objects.create(user=pi_user)
-        u1.research_group.add(rg)
-        u1.save()
-
-        # create a PendingUser, consistent with a new user request  
-        p = PendingUser.objects.create(
-            is_pi = False, info_json = json.dumps(self.postdoc_info_dict)
-        )
-
-        staff_approve_pending_user(p.pk)
-        mock_send_account_pending_email_to_requester.assert_called_once()
-        mock_send_approval_email_to_pi.assert_called_once()
 
 
     def test_pi_approval_for_own_new_group_creates_resources(self):
@@ -1031,15 +985,405 @@ class AccountRequestTestCase(TestCase):
         mock_send_account_pending_email_to_requester.assert_called_once() 
         mock_send_approval_email_to_pi.assert_called_once()
 
+    @mock.patch('main_app.tasks.send_account_pending_email_to_requester')
+    @mock.patch('main_app.tasks.send_approval_email_to_pi')
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
+    def test_handle_secondary_requests_before_first_is_confirmed(self, 
+        mock_send_account_confirmed_email_to_requester,
+        mock_send_approval_email_to_pi,
+        mock_send_account_pending_email_to_requester):
+        '''
+        This tests the case where someone signs up and their PI is sent an email
+        (as well as the applicant).  The PI does not click the link for a while
+        and the user tries to register another account with the same PI.
+
+        Since we do not want to go through the trouble of parsing all the
+        info in the PendingUser objects, we technically allow that second request
+        (and further) so that there can be any number of 'open requests' sent
+        to the PI.  HOWEVER, as soon as any of those are clicked, future 
+        registrations for that same applicant are blocked (since emails are 
+        intended to uniquely identify clients)
+        '''
+        # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+
+        # confirm no pending users already:
+        p = PendingUser.objects.all()
+        self.assertEqual(len(p), 0)
+
+        # initiate the request
+        handle_account_request_for_new_user(self.postdoc_info_dict, False, rg)
+        mock_send_account_pending_email_to_requester.assert_called_once()
+        mock_send_approval_email_to_pi.assert_called_once()
+
+        # confirm that created a pending user:
+        p = PendingUser.objects.all()
+        self.assertEqual(len(p), 1)
+
+        # initiate the request AGAIN
+        handle_account_request_for_new_user(self.postdoc_info_dict, False, rg)
+        self.assertEqual(2, mock_send_account_pending_email_to_requester.call_count)
+        self.assertEqual(2, mock_send_approval_email_to_pi.call_count)
+
+        # confirm that created a pending user:
+        p = PendingUser.objects.all()
+        self.assertEqual(len(p), 2)
+
+        # confirm no new users added:
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 1)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 1)
+
+        # mock the PI clicking on one of those emails that were sent out
+        pk = p[1].pk
+        pi_approve_pending_user(pk)
+        existing_research_groups = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_research_groups), 1)
+        mock_send_account_confirmed_email_to_requester.assert_called_once()
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 2)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 2)
+
+        # now pretend that the PI clicks on the OTHER confirmation email,
+        # not realizing what is going on
+        pk = p[0].pk
+        pi_approve_pending_user(pk)
+
+        # the number of groups, users, etc should remain the same
+        # also note that the confirmation email sent to the user
+        # is not sent a second time
+        existing_research_groups = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_research_groups), 1)
+        mock_send_account_confirmed_email_to_requester.assert_called_once()
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 2)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 2)
+
+
 class PipelineRequestTestCase(TestCase):
     '''
     Tests the functionality/logic of the pipeline request workflow
     '''
     def setUp(self):
-        pass
+
+        self.postdoc_info_dict = {
+            "REGISTERED":"Yes",
+            "EMAIL": settings.TEST_POSTDOC_EMAIL,
+            "PI_EMAIL":settings.TEST_PI_EMAIL,
+            "HAVE_ACCT_NUM":"Yes",
+            "ACCT_NUM":"1234",
+            "NUM_OF_SAMPLE":"6",
+            "PIPELINE": "Single End RNASeq Analysis",
+            "SEQ_TYPE":"Illumina Single End 75bp"
+        }
+
+        self.postdoc_info_dict_no_acct = {
+            "REGISTERED":"Yes",
+            "EMAIL": settings.TEST_POSTDOC_EMAIL,
+            "PI_EMAIL":settings.TEST_PI_EMAIL,
+            "HAVE_ACCT_NUM":"No",
+            "ACCT_NUM":"",
+            "NUM_OF_SAMPLE":"6",
+            "PIPELINE": "Single End RNASeq Analysis",
+            "SEQ_TYPE":"Illumina Single End 75bp"
+        }
+
+        self.pi_info_dict = {
+            'FIRST_NAME': 'John',
+            'LAST_NAME': 'Smith',
+            'EMAIL': settings.TEST_PI_EMAIL,
+            'PHONE': '123-456-7890',
+            'PI': 'Yes',
+            'PI_FIRST_NAME': 'John',
+            'PI_LAST_NAME': 'Smith',
+            'PI_EMAIL': settings.TEST_PI_EMAIL,
+            'PI_PHONE': '123-456-7890',
+            'HARVARD_APPOINTMENT': 'Yes',
+            'ORGANIZATION': 'HSPH',
+            'DEPARTMENT': 'Biostatistics',
+            'FINANCIAL_CONTACT': '',
+            'FINANCIAL_EMAIL': '',
+            'ADDRESS': '',
+            'CITY': '',
+            'STATE': '',
+            'POSTAL_CODE': '',
+            'COUNTRY': ''
+        }
     
     def tearDown(self):
         pass
+
+    @mock.patch('main_app.tasks.ask_requester_to_register_first')
+    def test_pipeline_request_without_account_rejected(self, mock_ask_requester_to_register_first):
+        '''
+        This tests is a regular user requests a pipeline, gives
+        info about a PI, etc. but they have not previously requested
+        a CNAP account
+        '''
+        handle_pipeline_request_email(self.postdoc_info_dict)
+        mock_ask_requester_to_register_first.assert_called_once()
+
+    @mock.patch('main_app.tasks.ask_pipeline_requester_to_register_lab')
+    def test_known_user_gives_unknown_pi_in_pipeline_request(self, mock_ask_pipeline_requester_to_register_lab):
+        '''
+        This tests the case where a base user is known, if they reach that point in the code, so
+        it's not likely to be malicious content to us, but they have 
+        given a PI email we do not recognize.
+        '''
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+        handle_pipeline_request_email(self.postdoc_info_dict)
+        mock_ask_pipeline_requester_to_register_lab.assert_called_once()
+
+    @mock.patch('main_app.tasks.ask_requester_to_associate_with_pi_first')
+    def test_known_user_gives_unknown_pi_in_pipeline_request(self, mock_ask_requester_to_associate_with_pi_first):
+        '''
+        This tests the case where a base user is known, if they reach that point in the code, so
+        it's not likely to be malicious content to us, as well as the 
+        PI.  However, they have not registered with this PI (i.e. there is no
+        CnapUser matching the query)
+        '''
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+
+        handle_pipeline_request_email(self.postdoc_info_dict)
+        mock_ask_requester_to_associate_with_pi_first.assert_called_once()
+
+    @mock.patch('main_app.tasks.inform_qbrc_of_request_without_payment_number')
+    @mock.patch('main_app.tasks.handle_no_payment_number')
+    def test_pipeline_request_without_code(self, mock_handle_no_payment_number,
+        mock_inform_qbrc_of_request_without_payment_number):
+        '''
+        This tests the case where a regular user (with an account)
+        requests a pipeline, but does not have a payment code
+
+        We send them a quote via email
+        '''
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+        u2 = CnapUser.objects.create(user=u)
+        u2.research_group.add(rg)
+        u2.save()
+
+        handle_pipeline_request_email(self.postdoc_info_dict_no_acct)
+        mock_handle_no_payment_number.assert_called_once()
+        mock_inform_qbrc_of_request_without_payment_number.assert_called_once()
+
+    @mock.patch('main_app.tasks.ask_user_to_resubmit_payment_info')
+    def test_pipeline_request_with_bad_code(self, mock_ask_user_to_resubmit_payment_info):
+        '''
+        Tests the case where the payment code was not found, such as with a 
+        typo.  The user and lab are known, if they reach that point in the code, so
+        it's not likely to be malicious content
+        '''
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+        u2 = CnapUser.objects.create(user=u)
+        u2.research_group.add(rg)
+        u2.save()
+
+        handle_pipeline_request_email(self.postdoc_info_dict)
+        mock_ask_user_to_resubmit_payment_info.assert_called_once()
+
+
+    @mock.patch('main_app.tasks.check_that_purchase_is_valid_against_payment')
+    @mock.patch('main_app.tasks.fill_order')
+    def test_pipeline_request_with_code(self, 
+        mock_fill_order, 
+        mock_check_that_purchase_is_valid_against_payment):
+        '''
+        This tests the case where a regular user (with an account)
+        requests a pipeline and provides a proper payment code
+        '''
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+        u2 = CnapUser.objects.create(user=u)
+        u2.research_group.add(rg)
+        u2.save()
+
+        # create the payment:
+        payment = Payment.objects.create(
+            client = rg,
+            code = '1234'
+        )
+
+        mock_check_that_purchase_is_valid_against_payment.return_value = (True, None)
+        handle_pipeline_request_email(self.postdoc_info_dict)
+        mock_check_that_purchase_is_valid_against_payment.assert_called_once()
+        mock_fill_order.assert_called_once()
+
+    def test_insufficient_funds_to_cover_requested_pipeline(self):
+        '''
+        This tests the case where the code is OK, but there is not
+        enough balance left from the original payment.
+
+        We inform the user of this
+        '''
+        pass
+
+    def test_pipeline_request_adds_to_balance(self):
+        '''
+        Here we test that a pipeline request subsequently reduces the
+        remaining balance from a payment that was made.  
+        '''
+        pass
+
+    def test_pipeline_request_for_open_po_works(self):
+        '''
+        If a payment amount is left null that indicates we have an open
+        PO or some other "unlimited" payment scheme setup.  Thus,
+        requests referencing the proper code should not be limited in any
+        way.
+        '''
+        pass
+    
+
 
 class QualtricsSurveyTestCase(TestCase):
     '''
@@ -1051,7 +1395,6 @@ class QualtricsSurveyTestCase(TestCase):
     
     def tearDown(self):
         pass
-
 
     @mock.patch('main_app.tasks.imaplib')
     def test_unreachable_imap_server_raises_ex(self, mock_imaplib):
