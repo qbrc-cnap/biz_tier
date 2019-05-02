@@ -1302,13 +1302,13 @@ def query_imap_server_for_ids(mail, subject):
 
 
 def get_account_creation_request_emails(mail):
-    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP-Pipeline]")'
+    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP Account]")'
     id_list = query_imap_server_for_ids(mail, search_str)
     return id_list
 
 
 def get_pipeline_request_emails(mail):
-    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP Account]")'
+    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP-Pipeline]")'
     id_list = query_imap_server_for_ids(mail, search_str)
     return id_list
     
