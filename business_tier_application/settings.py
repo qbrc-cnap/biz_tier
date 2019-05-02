@@ -25,7 +25,7 @@ SECRET_KEY = 'jteph!f-6s$2z(jtb6(88+r1l0z8f3s9ruenivkxiu3@xy@ha^'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['dev.tm4.org']
 
 
 # Application definition
@@ -147,8 +147,8 @@ CELERY_RESULT_SERIALIZER = 'json'
 ###############################################################################
 MAIL_HOST = 'outlook.office365.com'
 MAIL_PORT = 993
-MAIL_USERNAME = ''
-MAIL_PASSWORD = ''
+MAIL_USERNAME = 'blawney@hsph.harvard.edu'
+MAIL_PASSWORD = '#Riella060613'
 MAIL_FOLDER_NAME = 'INBOX'
 
 # some dummy emails for testing purposes.  If an email function is invoked
@@ -161,3 +161,6 @@ TEST_FINANCE_EMAIL = 'finance@foo.com'
 TEST_EMAIL_ADDRESSES = [TEST_PI_EMAIL, TEST_FINANCE_EMAIL, TEST_POSTDOC_EMAIL, TEST_GRAD_STUDENT_EMAIL, TEST_ANOTHER_PI_EMAIL]
 
 QBRC_EMAIL = 'qbrc@hsph.harvard.edu'
+
+EMAIL_CREDENTIALS_FILE = '/www/credentials/final.json'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')

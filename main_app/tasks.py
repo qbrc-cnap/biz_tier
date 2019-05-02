@@ -90,11 +90,11 @@ def send_self_approval_email_to_pi(pending_user_instance):
     '''
 
     user_info = json.loads(pending_user_instance.info_json)
-    pi_email = user_info('PI_EMAIL')
+    pi_email = user_info['PI_EMAIL']
     approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
     current_site = Site.objects.get_current()
     domain = current_site.domain
-    full_url = 'https://%s%s' % (domain, approval_url)
+    full_url = 'http://%s:8000%s' % (domain, approval_url)
     subject = '[CNAP] New account confirmation'
     plaintext_msg = '''
         A new account was requested, which listed your email as the principal investigator. 
@@ -139,11 +139,11 @@ def send_approval_email_to_pi(pending_user_instance):
     '''
 
     user_info = json.loads(pending_user_instance.info_json)
-    pi_email = user_info('PI_EMAIL')
+    pi_email = user_info['PI_EMAIL']
     approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
     current_site = Site.objects.get_current()
     domain = current_site.domain
-    full_url = 'https://%s%s' % (domain, approval_url)
+    full_url = 'http://%s:8000%s' % (domain, approval_url)
     subject = '[CNAP] New account confirmation'
     requesting_user_firstname = user_info['FIRST_NAME']
     requesting_user_lastname = user_info['LAST_NAME']
@@ -190,7 +190,7 @@ def send_account_pending_email_to_requester(pending_user_instance):
     else as the PI.  We let them know that the PI has to still approve
     ''' 
     user_info = json.loads(pending_user_instance.info_json)
-    pi_email = user_info('PI_EMAIL')
+    pi_email = user_info['PI_EMAIL']
     subject = '[CNAP] Notification: account pending'
     requesting_user_email = user_info['EMAIL']
 
@@ -231,7 +231,7 @@ def send_account_confirmed_email_to_requester(pending_user_instance):
     the PI has approved the request
     ''' 
     user_info = json.loads(pending_user_instance.info_json)
-    pi_email = user_info('PI_EMAIL')
+    pi_email = user_info['PI_EMAIL']
     subject = '[CNAP] New account created'
     requesting_user_email = user_info['EMAIL']
 
@@ -443,7 +443,10 @@ def parse_email_contents(payload, required_keyset):
     info_dict = {}
     contents = [x.strip() for x in body_markup.text.split('\n') if len(x.strip()) > 0]
     for x in contents:
-        key, val = x.strip().split(':', 1) # only split on first colon, since there could be a colon in the response
+        try:
+            key, val = x.strip().split(':', 1) # only split on first colon, since there could be a colon in the response
+        except ValueError as ex:
+            raise MailParseException('Email parse error.  Encountered problem with this line: %s' % x)
         key = key.strip()
         val = val.strip()
         if key in required_keyset:
@@ -483,7 +486,7 @@ def fetch_emails(mail, id_list):
     Returns a list
     '''
     # have to turn the id list into a csv of integers:
-    id_csv = ','.join(id_list)
+    id_csv = ','.join([str(x) for x in id_list])
     status, messages = mail.fetch(id_csv, '(BODY.PEEK[])')
     if status != 'OK':
         raise MailQueryException('Failed when fetching messages.')
@@ -509,7 +512,7 @@ def inform_staff_of_new_account(pending_user):
     approval_url = reverse('staff_account_approval', args=[pending_user.pk,])
     current_site = Site.objects.get_current()
     domain = current_site.domain
-    full_url = 'https://%s%s' % (domain, approval_url)
+    full_url = 'http://%s:8000%s' % (domain, approval_url)
     subject = '[CNAP] New account request'
     plaintext_msg = '''
         A new account request was received:
@@ -1252,6 +1255,9 @@ def process_emails(mail, id_list, request_type):
     is a UID of an email that matched our query.  It should be a list of 
     UIDs that we have not already checked.
     '''
+    if len(id_list) == 0:
+        return
+
     # go get the messages.  It is a list of where the odd indexes are byte strings (useless for our purposes here)
     # and the even-numbered indexes have tuples.
     messages = fetch_emails(mail, id_list)
@@ -1292,7 +1298,8 @@ def query_imap_server_for_ids(mail, subject):
     # warn the admins- it is quite unlikely that there will be ZERO messages
     # matching our query.  Not strictly an error, but a warning
     if len(response[0]) == 0:
-        raise MailQueryWarning('Empty query response from IMAP server.')
+        #raise MailQueryWarning('Empty query response from IMAP server.')
+        return []
 
     try:
         id_list = [int(x) for x in response[0].decode('utf-8').split(' ')]
@@ -1302,13 +1309,13 @@ def query_imap_server_for_ids(mail, subject):
 
 
 def get_account_creation_request_emails(mail):
-    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP Account]")'
+    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP_Account]")'
     id_list = query_imap_server_for_ids(mail, search_str)
     return id_list
 
 
 def get_pipeline_request_emails(mail):
-    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP-Pipeline]")'
+    search_str = '(TO "qbrc@hsph.harvard.edu") (SUBJECT "[CNAP_Pipeline]")'
     id_list = query_imap_server_for_ids(mail, search_str)
     return id_list
     
