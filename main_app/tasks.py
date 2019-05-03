@@ -1097,8 +1097,10 @@ def check_that_purchase_is_valid_against_payment(info_dict, payment_ref):
         if new_sum > payment_amount:
             rejection_reason = '''
             The cost of the requested project exceeds the payment it is 
-            billed against.  Please contact the QBRC to resolve this.
-            '''
+            billed against.  The total cost of the order (%d analyses at $%.2f each),
+            when added to the prior charges ($%.2f), exceeded 
+            the total initial payment ($%.2f).  Please contact the QBRC to resolve this.
+            ''' % (qty, unit, current_charges_against_payment, payment_amount)
             return (False, rejection_reason)
         else: # the new charge did not exceed the payment, so it's allowed
             # update the budget to reflect this new charge and save it:
