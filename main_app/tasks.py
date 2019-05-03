@@ -876,7 +876,7 @@ def calculate_total_purchase(info_dict):
             raise InventoryException('The quantity ordered (%d) was greater than the number available')
     # if we make it here, we either have unlimited product or the quantity ordered
     # was OK given our inventory
-    return quantity_ordered*product.unit_cost
+    return (quantity_ordered, product.unit_cost)
 
 
 def send_inventory_alert_to_requester(info_dict):
@@ -972,7 +972,8 @@ def handle_no_payment_number(info_dict):
     '''
     # prepare some cost estimate:
     try:
-        total_cost = calculate_total_purchase(info_dict)
+        qty, unit_cost = calculate_total_purchase(info_dict)
+        total_cost = qty * unit_cost
     except InventoryException as ex:
         send_inventory_alert_to_requester(info_dict)
         send_inventory_alert_to_qbrc(info_dict)
@@ -989,21 +990,29 @@ def handle_no_payment_number(info_dict):
         The pipeline request you have submitted was not associated with a known
         payment method.  The QBRC will be in contact with you to work out details.
 
+        The order requested was:
+        - %s (%d at $%.2f each)
         The total cost of the request is $%.2f
 
         qBRC Team (qbrc@hsph.harvard.edu)
-    ''' % total_cost
+    ''' % (info_dict['PIPELINE'], qty, unit_cost, total_cost)
 
     message_html = '''
         <html>
         <body>
         <p>The pipeline request you have submitted was not associated with a known
         payment method.  The QBRC will be in contact with you to work out details.</p>
+        The order requested was:
+        <ul>
+        <li>
+          %s (%d at $%.2f each)
+        </li>
+        </ul>
         <p>The total cost of the request is $%.2f</p>
         <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
-    ''' % total_cost
+    ''' % (info_dict['PIPELINE'], qty, unit_cost, total_cost)
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
 
@@ -1066,7 +1075,8 @@ def check_that_purchase_is_valid_against_payment(info_dict, payment_ref):
     with their purchase
     '''
     try:
-        total_cost = calculate_total_purchase(info_dict)
+        qty, unit = calculate_total_purchase(info_dict)
+        total_cost = qty*unit
     except InventoryException as ex:
         send_inventory_alert_to_qbrc(info_dict)
         return (False, 'The requested order exceeded our inventory')

@@ -542,7 +542,8 @@ class AccountRequestTestCase(TestCase):
         mock_send_self_approval_email_to_pi.assert_called_once()
 
 
-    def test_pi_approval_for_own_new_group_creates_resources(self):
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_pi_approval_for_own_new_group_creates_resources(self, mock_send_account_confirmed_email_to_qbrc):
         '''
         Here we test the case where the PI (who was previously unknown)
         has confirmed by clicking on the email.  Here they are creating
@@ -575,9 +576,12 @@ class AccountRequestTestCase(TestCase):
         existing_cnap_users = CnapUser.objects.all()
         self.assertEqual(len(existing_cnap_users), 1)
 
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
+
 
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
-    def test_pi_approval_for_new_group_creates_resources(self, mock_send_account_confirmed_email_to_requester):
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_pi_approval_for_new_group_creates_resources(self, mock_send_account_confirmed_email_to_qbrc, mock_send_account_confirmed_email_to_requester):
         '''
         Here we test the case where the PI (who was previously unknown)
         has confirmed by clicking on the email.  Check that we create a ResearchGroup,
@@ -615,9 +619,11 @@ class AccountRequestTestCase(TestCase):
         self.assertEqual(len(existing_cnap_users), 2)
 
         mock_send_account_confirmed_email_to_requester.assert_called_once()
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
 
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
-    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case1(self, mock_send_account_confirmed_email_to_requester):
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case1(self, mock_send_account_confirmed_email_to_qbrc, mock_send_account_confirmed_email_to_requester):
         '''
         Here we imagine having an existing lab with the PI as the only user.  A new user
         (e.g. postdoc) associates with them.  The PI authorizes this by clicking 
@@ -676,9 +682,12 @@ class AccountRequestTestCase(TestCase):
         existing_cnap_users = CnapUser.objects.all()
         self.assertEqual(len(existing_cnap_users), 2)
         mock_send_account_confirmed_email_to_requester.assert_called_once()
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
+
 
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
-    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case2(self, mock_send_account_confirmed_email_to_requester):
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case2(self, mock_send_account_confirmed_email_to_qbrc, mock_send_account_confirmed_email_to_requester):
         '''
         Here we imagine having an existing lab with multiple users (i.e. some
         are NOT the PI).  A new user (e.g. postdoc) associates with them.  
@@ -750,9 +759,12 @@ class AccountRequestTestCase(TestCase):
         existing_cnap_users = CnapUser.objects.all()
         self.assertEqual(len(existing_cnap_users), 3)
         mock_send_account_confirmed_email_to_requester.assert_called_once()
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
+
 
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
-    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case3(self, mock_send_account_confirmed_email_to_requester):
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_pi_approves_addition_to_existing_group_properly_adds_new_user_case3(self, mock_send_account_confirmed_email_to_qbrc, mock_send_account_confirmed_email_to_requester):
         '''
         Here we imagine having an existing lab with multiple users (i.e. some
         are NOT the PI).  A previously EXISTING user (e.g. postdoc from another lab) associates with them.  
@@ -854,6 +866,8 @@ class AccountRequestTestCase(TestCase):
         existing_cnap_users = CnapUser.objects.all()
         self.assertEqual(len(existing_cnap_users), 4)
         mock_send_account_confirmed_email_to_requester.assert_called_once()
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
+
 
     @mock.patch('main_app.tasks.fetch_emails')
     @mock.patch('main_app.tasks.get_email_body')
@@ -998,7 +1012,9 @@ class AccountRequestTestCase(TestCase):
     @mock.patch('main_app.tasks.send_account_pending_email_to_requester')
     @mock.patch('main_app.tasks.send_approval_email_to_pi')
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
-    def test_handle_secondary_requests_before_first_is_confirmed(self, 
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_handle_secondary_requests_before_first_is_confirmed(self,
+        mock_send_account_confirmed_email_to_qbrc, 
         mock_send_account_confirmed_email_to_requester,
         mock_send_approval_email_to_pi,
         mock_send_account_pending_email_to_requester):
@@ -1075,6 +1091,7 @@ class AccountRequestTestCase(TestCase):
         existing_research_groups = ResearchGroup.objects.all()
         self.assertEqual(len(existing_research_groups), 1)
         mock_send_account_confirmed_email_to_requester.assert_called_once()
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
         existing_users = get_user_model().objects.all()
         self.assertEqual(len(existing_users), 2)
         existing_cnap_users = CnapUser.objects.all()
@@ -1404,7 +1421,7 @@ class PipelineRequestTestCase(TestCase):
 
         #mock that the total cost of this pipeline request will
         # exceed the initial payment when added to the prior purchases
-        mock_calculate_total_purchase.return_value = 40.00
+        mock_calculate_total_purchase.return_value = (4, 10.00)
 
         is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
         self.assertFalse(is_valid)
@@ -1446,7 +1463,7 @@ class PipelineRequestTestCase(TestCase):
 
         #mock that the total cost of this pipeline request will
         # NOT exceed the initial payment when added to the prior purchases
-        mock_calculate_total_purchase.return_value = 10.00
+        mock_calculate_total_purchase.return_value = (1, 10.00)
 
         is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
         self.assertTrue(is_valid)
@@ -1486,7 +1503,7 @@ class PipelineRequestTestCase(TestCase):
 
         #mock that the total cost of this pipeline request will
         # NOT exceed the initial payment when added to the prior purchases
-        mock_calculate_total_purchase.return_value = 20.00
+        mock_calculate_total_purchase.return_value = (2, 10.00)
 
         is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
         self.assertTrue(is_valid)
@@ -1522,7 +1539,7 @@ class PipelineRequestTestCase(TestCase):
         )
 
         #mock that the total cost of this pipeline request
-        mock_calculate_total_purchase.return_value = 2000.00
+        mock_calculate_total_purchase.return_value = (200, 10.00)
 
         is_valid, reason = check_that_purchase_is_valid_against_payment({}, p)
         self.assertTrue(is_valid)
@@ -1544,7 +1561,8 @@ class PipelineRequestTestCase(TestCase):
             'NUM_OF_SAMPLE': 6
         }
 
-        total_cost = calculate_total_purchase(info_dict)
+        qty, unit_cost = calculate_total_purchase(info_dict)
+        total_cost = qty*unit_cost
         self.assertEqual(total_cost, 60.00)
 
     @mock.patch('main_app.tasks.inform_qbrc_of_bad_pipeline_request')
