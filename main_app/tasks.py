@@ -94,7 +94,7 @@ def send_self_approval_email_to_pi(pending_user_instance):
     approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
     current_site = Site.objects.get_current()
     domain = current_site.domain
-    full_url = 'http://%s:8000%s' % (domain, approval_url)
+    full_url = 'https://%s%s' % (domain, approval_url)
     subject = '[CNAP] New account confirmation'
     plaintext_msg = '''
         A new account was requested, which listed your email as the principal investigator. 
@@ -107,7 +107,7 @@ def send_self_approval_email_to_pi(pending_user_instance):
         If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper confirmation.
 
-        - QBRC staff
+        - qBRC Team (qbrc@hsph.harvard.edu)
     ''' % (json.dumps(user_info), full_url)
 
     message_html = '''
@@ -125,7 +125,7 @@ def send_self_approval_email_to_pi(pending_user_instance):
         <p>If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper confirmation.</p> 
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % (json.dumps(user_info), full_url)
@@ -143,7 +143,7 @@ def send_approval_email_to_pi(pending_user_instance):
     approval_url = reverse('pi_account_approval', args=[pending_user_instance.approval_key,])
     current_site = Site.objects.get_current()
     domain = current_site.domain
-    full_url = 'http://%s:8000%s' % (domain, approval_url)
+    full_url = 'https://%s%s' % (domain, approval_url)
     subject = '[CNAP] New account confirmation'
     requesting_user_firstname = user_info['FIRST_NAME']
     requesting_user_lastname = user_info['LAST_NAME']
@@ -160,7 +160,7 @@ def send_approval_email_to_pi(pending_user_instance):
         If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper authorization by the principal investigator.
 
-        - QBRC staff
+        - qBRC Team (qbrc@hsph.harvard.edu)
     ''' % (requesting_user_firstname, requesting_user_lastname, requesting_user_email, full_url)
 
     message_html = '''
@@ -176,7 +176,7 @@ def send_approval_email_to_pi(pending_user_instance):
         <p>If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper authorization by the principal investigator.</p> 
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % (requesting_user_firstname, requesting_user_lastname, requesting_user_email, full_url)
@@ -202,7 +202,7 @@ def send_account_pending_email_to_requester(pending_user_instance):
         Until approval is granted by the PI, your request will be pending.  No accounts are created 
         without proper authorization by the principal investigator.
 
-        - QBRC staff
+        qBRC Team (qbrc@hsph.harvard.edu)
     ''' % (pi_email)
 
     message_html = '''
@@ -217,7 +217,7 @@ def send_account_pending_email_to_requester(pending_user_instance):
         <p>Until approval is granted by the PI, your request will be pending.  No accounts are created 
         without proper authorization by the principal investigator.</p> 
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % (pi_email)
@@ -240,7 +240,7 @@ def send_account_confirmed_email_to_requester(pending_user_instance):
         principal investigator you have listed (%s).  You may now request analysis projects
         on the CNAP platform.
 
-        - QBRC staff
+        qBRC Team (qbrc@hsph.harvard.edu)
     ''' % (pi_email)
 
     message_html = '''
@@ -252,7 +252,7 @@ def send_account_confirmed_email_to_requester(pending_user_instance):
         on the CNAP platform
         </p>
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % (pi_email)
@@ -274,7 +274,7 @@ def send_account_confirmed_email_to_qbrc(pending_user_instance):
         The following account has been approved by the PI (%s):
 
         %s %s (%s)
-        - QBRC staff
+        
     ''' % (pi_email, user_info['FIRST_NAME'], user_info['LAST_NAME'], requesting_user_email)
 
     message_html = '''
@@ -550,7 +550,7 @@ def inform_staff_of_new_account(pending_user):
     approval_url = reverse('staff_account_approval', args=[pending_user.pk,])
     current_site = Site.objects.get_current()
     domain = current_site.domain
-    full_url = 'http://%s:8000%s' % (domain, approval_url)
+    full_url = 'https://%s%s' % (domain, approval_url)
     subject = '[CNAP] New account request'
     plaintext_msg = '''
         A new account request was received:
@@ -610,6 +610,8 @@ def inform_user_of_existing_account(info_dict):
     plaintext_msg = '''
         A new account request for CNAP was received for your email.  We already have an account
         with that email associated with your designated PI, so no action has been performed.
+
+        qBRC Team (qbrc@hsph.harvard.edu)
     '''
 
     message_html = '''
@@ -618,6 +620,7 @@ def inform_user_of_existing_account(info_dict):
         <p>        
         A new account request for CNAP was received for your email.  We already have an account
         with that email associated with your designated PI, so no action has been performed.</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     '''
@@ -733,7 +736,8 @@ def ask_requester_to_register_first(email):
     plaintext_msg = '''
         This email is to let you know that your pipeline request was denied since you have not registered an active account with 
         us.  Please fill out the account request first.
-        - QBRC staff
+        
+        qBRC Team (qbrc@hsph.harvard.edu)
     '''
 
     message_html = '''
@@ -744,7 +748,7 @@ def ask_requester_to_register_first(email):
         us.  Please fill out the account request first.
         </p>
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     '''
@@ -782,7 +786,7 @@ def ask_requester_to_associate_with_pi_first(info_dict):
     plaintext_msg = '''
         %s
 
-        - QBRC staff
+        qBRC Team (qbrc@hsph.harvard.edu)
     ''' % message
 
     message_html = '''
@@ -792,7 +796,7 @@ def ask_requester_to_associate_with_pi_first(info_dict):
         %s
         </p>
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % message
@@ -884,7 +888,8 @@ def send_inventory_alert_to_requester(info_dict):
     plaintext_msg = '''
         This email is to let you know that your pipeline request was denied since the order exceeded
         our available inventory.  Please contact the QBRC to resolve this issue.
-        - QBRC staff
+
+        qBRC Team (qbrc@hsph.harvard.edu)
     '''
 
     message_html = '''
@@ -895,7 +900,7 @@ def send_inventory_alert_to_requester(info_dict):
         our available inventory.  Please contact the QBRC to resolve this issue.
         </p>
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     '''
@@ -941,7 +946,8 @@ def general_alert_to_requester(info_dict):
     plaintext_msg = '''
         This email is to let you know that your pipeline request was denied due to an unexpected
         problem.  We are working to resolve this and will be in contact.
-        - QBRC staff
+
+        qBRC Team (qbrc@hsph.harvard.edu)
     '''
 
     message_html = '''
@@ -952,7 +958,7 @@ def general_alert_to_requester(info_dict):
         problem.  We are working to resolve this and will be in contact.
         </p>
 
-        <p>QBRC staff</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     '''
@@ -984,6 +990,8 @@ def handle_no_payment_number(info_dict):
         payment method.  The QBRC will be in contact with you to work out details.
 
         The total cost of the request is $%.2f
+
+        qBRC Team (qbrc@hsph.harvard.edu)
     ''' % total_cost
 
     message_html = '''
@@ -992,6 +1000,7 @@ def handle_no_payment_number(info_dict):
         <p>The pipeline request you have submitted was not associated with a known
         payment method.  The QBRC will be in contact with you to work out details.</p>
         <p>The total cost of the request is $%.2f</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % total_cost
@@ -1013,6 +1022,8 @@ def ask_user_to_resubmit_payment_info(info_dict):
         the number correctly.  If you believe this is in error, please contact the QBRC.
 
         Provided payment number: %s
+
+        qBRC Team (qbrc@hsph.harvard.edu)
     ''' % info_dict['ACCT_NUM']
 
     message_html = '''
@@ -1023,6 +1034,7 @@ def ask_user_to_resubmit_payment_info(info_dict):
         the number correctly.  If you believe this is in error, please contact the QBRC.</p>
 
         <p>Provided payment number: %s</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % info_dict['ACCT_NUM']
@@ -1093,7 +1105,7 @@ def create_project_on_cnap(order_obj):
     '''
     This handles the actual work of contacting CNAP to generate a new project
     '''
-    pass
+    print('Create project on CNAP')
 
 
 def fill_order(info_dict, payment_ref):
@@ -1163,6 +1175,8 @@ def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
         The provided payment number was: %s
 
         Please work with the QBRC to resolve this matter.
+ 
+        qBRC Team (qbrc@hsph.harvard.edu)
 
     ''' % (rejection_reason, info_dict['ACCT_NUM'])
 
@@ -1175,6 +1189,7 @@ def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
         <p>%s</p>
         <hr>
         <p>The provided payment number was: %s</p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
     ''' % (rejection_reason, info_dict['ACCT_NUM'])
@@ -1198,6 +1213,8 @@ def ask_pipeline_requester_to_register_lab(info_dict):
         If the email you entered was correct, we first need to register
         this new principal investigator with our system.  
 
+        qBRC Team (qbrc@hsph.harvard.edu)
+
     ''' % (info_dict['PI_EMAIL'])
 
     message_html = '''
@@ -1210,9 +1227,10 @@ def ask_pipeline_requester_to_register_lab(info_dict):
         <p>
         If the email you entered was correct, we first need to register
         this new principal investigator with our system. </p>
+        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
-    ''' % (rejection_reason, info_dict['ACCT_NUM'])
+    ''' % (info_dict['PI_EMAIL'])
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
