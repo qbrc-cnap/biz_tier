@@ -20,12 +20,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/2.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'jteph!f-6s$2z(jtb6(88+r1l0z8f3s9ruenivkxiu3@xy@ha^'
+SECRET_KEY = ''
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = ['dev.tm4.org']
+ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -145,10 +145,10 @@ CELERY_RESULT_SERIALIZER = 'json'
 ###############################################################################
 # Parameters for the QBRC mailbox
 ###############################################################################
-MAIL_HOST = 'outlook.office365.com'
+MAIL_HOST = ''
 MAIL_PORT = 993
-MAIL_USERNAME = 'blawney@hsph.harvard.edu'
-MAIL_PASSWORD = '#Riella060613'
+MAIL_USERNAME = ''
+MAIL_PASSWORD = ''
 MAIL_FOLDER_NAME = 'INBOX'
 
 # some dummy emails for testing purposes.  If an email function is invoked
