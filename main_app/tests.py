@@ -542,8 +542,7 @@ class AccountRequestTestCase(TestCase):
         mock_send_self_approval_email_to_pi.assert_called_once()
 
 
-    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
-    def test_pi_approval_for_own_new_group_creates_resources(self, mock_send_account_confirmed_email_to_qbrc):
+    def test_pi_approval_for_own_new_group_creates_resources(self):
         '''
         Here we test the case where the PI (who was previously unknown)
         has confirmed by clicking on the email.  Here they are creating
@@ -575,8 +574,6 @@ class AccountRequestTestCase(TestCase):
         self.assertEqual(len(existing_users), 1)
         existing_cnap_users = CnapUser.objects.all()
         self.assertEqual(len(existing_cnap_users), 1)
-
-        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
 
 
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
