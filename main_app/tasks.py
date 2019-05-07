@@ -1117,7 +1117,27 @@ def create_project_on_cnap(order_obj):
     '''
     This handles the actual work of contacting CNAP to generate a new project
     '''
-    print('Create project on CNAP')
+    product = order_obj.product
+    purchase = order_obj.purchase
+    cnap_user = purchase.user
+    client_email = cnap_user.user.email
+
+    data = {}
+    data['client_email'] = client_email
+    data['workflow_pk'] = product.cnap_workflow_pk
+    data['number_ordered'] = order.quantity
+
+    headers = {'Authorization': 'Token %s' % settings.CNAP_TOKEN}
+    
+    r = requests.post(settings.CNAP_URL, data=data, headers=headers)
+
+    if r.status_code != 200:
+        message = '''
+        The project creation call did not return 200.  The error was
+        %s
+        ''' % r.text
+        handle_exception(None, message = message)
+    
 
 
 def fill_order(info_dict, payment_ref):

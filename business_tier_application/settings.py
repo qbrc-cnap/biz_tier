@@ -164,3 +164,8 @@ QBRC_EMAIL = 'qbrc@hsph.harvard.edu'
 
 EMAIL_CREDENTIALS_FILE = '/www/credentials/final.json'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
+
+# For creating CNAP projects:
+CNAP_URL = ''
+CNAP_TOKEN = ''
