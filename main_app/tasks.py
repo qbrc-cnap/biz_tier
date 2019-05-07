@@ -609,24 +609,24 @@ def inform_user_of_existing_account(info_dict):
     domain = current_site.domain
     subject = '[CNAP] Duplicate account request received'
     plaintext_msg = '''
-        A new account request for CNAP was received for your email.  We already have an account
-        with that email associated with your designated PI, so no action has been performed.
+        A new account request for CNAP was received for your email (%s).  We already have an account
+        with that email associated with your designated PI (%s), so no action has been performed.
 
         qBRC Team (qbrc@hsph.harvard.edu)
-    '''
+    ''' % (info_dict['EMAIL'], info_dict['PI_EMAIL'])
 
     message_html = '''
         <html>
         <body>
         <p>        
-        A new account request for CNAP was received for your email.  We already have an account
-        with that email associated with your designated PI, so no action has been performed.</p>
+        A new account request for CNAP was received for your email (%s).  We already have an account
+        with that email associated with your designated PI (%s), so no action has been performed.</p>
         <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
         </body>
         </html>
-    '''
+    ''' % (info_dict['EMAIL'], info_dict['PI_EMAIL'])
 
-    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
 
 def determine_if_existing_user(info_dict):
@@ -1126,7 +1126,7 @@ def create_project_on_cnap(order_obj):
     data = {}
     data['client_email'] = client_email
     data['workflow_pk'] = product.cnap_workflow_pk
-    data['number_ordered'] = order.quantity
+    data['number_ordered'] = order_obj.quantity
 
     headers = {'Authorization': 'Token %s' % settings.CNAP_TOKEN}
     
