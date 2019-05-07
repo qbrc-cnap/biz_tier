@@ -6,6 +6,7 @@ import bs4
 import json
 import hashlib
 import uuid
+import requests
 
 from django.conf import settings
 from django.urls import reverse
