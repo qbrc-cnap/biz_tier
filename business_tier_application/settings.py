@@ -169,3 +169,9 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 # For creating CNAP projects:
 CNAP_URL = ''
 CNAP_TOKEN = ''
+
+# the url for the url to request a pipeline (including https://...)
+QUALTRICS_PIPELINE_CREATION_URL = ''
+
+# the password to access that request url:
+QUALTRICS_PIPELINE_CREATION_PWD = ''

@@ -44,6 +44,9 @@ class InventoryException(Exception):
 class ProductDoesNotExistException(Exception):
     pass
 
+class ProjectCreationException(Exception):
+    pass
+
 
 # these are keys required to be sent in the account request email:
 REQUIRED_ACCOUNT_CREATION_KEYS = ['FIRST_NAME', \
@@ -64,7 +67,7 @@ REQUIRED_ACCOUNT_CREATION_KEYS = ['FIRST_NAME', \
     'CITY', \
     'STATE', \
     'POSTAL_CODE', \
-    'COUNTRY'
+    'COUNTRY', \
 ]
 
 REQUIRED_PIPELINE_CREATION_KEYS = {
@@ -98,37 +101,26 @@ def send_self_approval_email_to_pi(pending_user_instance):
     full_url = 'https://%s%s' % (domain, approval_url)
     subject = '[CNAP] New account confirmation'
     plaintext_msg = '''
-        A new account was requested, which listed your email as the principal investigator. 
-        The information we collected was:
-        -------------------------------------
-        %s
-        -------------------------------------
-        Click the following link (or copy/paste into a browser) to approve this: %s
+        Before we activate your CNAP account, we require your confirmation--
+        
+        Please click the following link (or copy/paste into a browser) to approve this: %s
 
         If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper confirmation.
 
-        - qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
+
     ''' % (json.dumps(user_info), full_url)
 
     message_html = '''
-        <html>
-        <body>
-        <p>A new account was requested, which listed your email as the principal investigator.</p>
-        <p>The information we collected was</p>
-        <hr>
-        <pre>
-        %s
-        </pre>
-        <hr>
+
+        <p>Before we activate your CNAP account, we require your confirmation--</p>
         <p>Click <a href="%s">here</a> to approve this request. </p>
 
         <p>If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper confirmation.</p> 
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
     ''' % (json.dumps(user_info), full_url)
     send_email(plaintext_msg, message_html, pi_email, subject)
 
@@ -161,12 +153,12 @@ def send_approval_email_to_pi(pending_user_instance):
         If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper authorization by the principal investigator.
 
-        - qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
     ''' % (requesting_user_firstname, requesting_user_lastname, requesting_user_email, full_url)
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>A new account was requested, which listed your email as the principal investigator.</p>
         <p>The information we collected was</p>
         <hr>
@@ -177,9 +169,9 @@ def send_approval_email_to_pi(pending_user_instance):
         <p>If you do not approve this request, you do not need to do anything.  No accounts
         are created without proper authorization by the principal investigator.</p> 
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
+        
+        
     ''' % (requesting_user_firstname, requesting_user_lastname, requesting_user_email, full_url)
 
     send_email(plaintext_msg, message_html, pi_email, subject)
@@ -203,12 +195,12 @@ def send_account_pending_email_to_requester(pending_user_instance):
         Until approval is granted by the PI, your request will be pending.  No accounts are created 
         without proper authorization by the principal investigator.
 
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
     ''' % (pi_email)
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>
         This email is to let you know that your account request has been approved by the QBRC staff,
         but still requires approval of the principal investigator you have listed (%s).  The PI 
@@ -218,12 +210,56 @@ def send_account_pending_email_to_requester(pending_user_instance):
         <p>Until approval is granted by the PI, your request will be pending.  No accounts are created 
         without proper authorization by the principal investigator.</p> 
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
+        
+        
     ''' % (pi_email)
 
     send_email(plaintext_msg, message_html, requesting_user_email, subject)
+
+
+def send_account_confirmed_email_to_pi(pending_user_instance):
+    '''
+    This sends a message to the PI after they have approved their own account
+    Importantly, this sends the project request + billing info to teh PI
+    ''' 
+    user_info = json.loads(pending_user_instance.info_json)
+    pi_email = user_info['PI_EMAIL']
+    subject = '[CNAP] New account created'
+
+    plaintext_msg = '''
+        Your CNAP account is confirmed.  You may now request analysis projects
+        on the CNAP platform at %s using
+        password "%s"
+
+        *IMPORTANT* You will need to provide the qBRC staff billing information such as a
+        GL Code/Costing String or PO number before analyses can be ordered. 
+        A quote will be emailed to you automatically after a project request if billing information is not available.
+
+        Please email us with any questions.
+    ''' % (settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+
+    message_html = '''
+        
+        
+        <p>
+        Your CNAP account is confirmed.  You may now request analysis projects
+        on the CNAP platform at <a href="%s">
+        %s</a>
+        using password "%s"
+        </p>
+
+        <p>
+        <b>IMPORTANT</b> You will need to provide the qBRC staff billing information such as a
+        GL Code/Costing String or PO number before analyses can be ordered. 
+        A quote will be emailed to you automatically after a project request if billing information is not available.</p>
+
+        <p>Please email us with any questions.</p>
+        
+        
+    ''' % (settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+
+    send_email(plaintext_msg, message_html, pi_email, subject)
 
 
 def send_account_confirmed_email_to_requester(pending_user_instance):
@@ -239,24 +275,38 @@ def send_account_confirmed_email_to_requester(pending_user_instance):
     plaintext_msg = '''
         This email is to let you know that your account request has been approved by your
         principal investigator you have listed (%s).  You may now request analysis projects
-        on the CNAP platform.
+        on the CNAP platform at %s using
+        password "%s"
 
-        qBRC Team (qbrc@hsph.harvard.edu)
-    ''' % (pi_email)
+        *IMPORTANT* You will need to provide the qBRC staff billing information such as a
+        GL Code/Costing String or PO number before analyses can be ordered. 
+        A quote will be emailed to you automatically after a project request if billing information is not available.
+
+        Please email us with any questions.
+    ''' % (pi_email, settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>
         This email is to let you know that your account request has been approved by your
         principal investigator you have listed (%s).  You may now request analysis projects
-        on the CNAP platform
+        on the CNAP platform at <a href="%s">
+        %s</a>
+        using password "%s"
         </p>
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
-    ''' % (pi_email)
+        <p>
+        <b>IMPORTANT</b> You will need to provide the qBRC staff billing information such as a
+        GL Code/Costing String or PO number before analyses can be ordered. 
+        A quote will be emailed to you automatically after a project request if billing information is not available.</p>
+
+        <p>Please email us with any questions.</p>
+        
+        
+    ''' % (pi_email, settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+
 
     send_email(plaintext_msg, message_html, requesting_user_email, subject)
 
@@ -279,8 +329,8 @@ def send_account_confirmed_email_to_qbrc(pending_user_instance):
     ''' % (pi_email, user_info['FIRST_NAME'], user_info['LAST_NAME'], requesting_user_email)
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>
         The following account has been approved by the PI (%s):
         </p>
@@ -289,8 +339,8 @@ def send_account_confirmed_email_to_qbrc(pending_user_instance):
         %s %s (%s)
         </p>
         <hl>
-        </body>
-        </html>
+        
+        
     ''' % (pi_email, user_info['FIRST_NAME'], user_info['LAST_NAME'], requesting_user_email)
 
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
@@ -402,6 +452,9 @@ def pi_approve_pending_user(pending_user_pk):
 
             # Let the QBRC know we have a new account confirmed:
             send_account_confirmed_email_to_qbrc(p)
+    else: # was the PI
+        send_account_confirmed_email_to_qbrc(p)
+        send_account_confirmed_email_to_pi(p)
 
     # at this point we can remove the PendingUser:
     #TODO: do we delete, or mark 'invative'?
@@ -562,8 +615,8 @@ def inform_staff_of_new_account(pending_user):
     ''' % (json.dumps(user_info), full_url)
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>A new account request was received:</p>
         <hr>
         <pre>
@@ -571,8 +624,8 @@ def inform_staff_of_new_account(pending_user):
         </pre>
         <hr>
         Go <a href="%s">here</a> to approve.
-        </body>
-        </html>
+        
+        
     ''' % (json.dumps(user_info), full_url)
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
 
@@ -612,18 +665,18 @@ def inform_user_of_existing_account(info_dict):
         A new account request for CNAP was received for your email (%s).  We already have an account
         with that email associated with your designated PI (%s), so no action has been performed.
 
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
     ''' % (info_dict['EMAIL'], info_dict['PI_EMAIL'])
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>        
         A new account request for CNAP was received for your email (%s).  We already have an account
         with that email associated with your designated PI (%s), so no action has been performed.</p>
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
+        
+        
     ''' % (info_dict['EMAIL'], info_dict['PI_EMAIL'])
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
@@ -738,20 +791,20 @@ def ask_requester_to_register_first(email):
         This email is to let you know that your pipeline request was denied since you have not registered an active account with 
         us.  Please fill out the account request first.
         
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
     '''
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>
         This email is to let you know that your pipeline request was denied since you have not registered an active account with 
         us.  Please fill out the account request first.
         </p>
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
+        
+        
     '''
 
     send_email(plaintext_msg, message_html, email, subject)
@@ -787,19 +840,19 @@ def ask_requester_to_associate_with_pi_first(info_dict):
     plaintext_msg = '''
         %s
 
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
     ''' % message
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>
         %s
         </p>
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
+        
+        
     ''' % message
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
@@ -807,25 +860,25 @@ def ask_requester_to_associate_with_pi_first(info_dict):
 
 def inform_qbrc_of_request_without_payment_number(info_dict):
 
-    subject = '[CNAP] Pipeline request received without payment account'
+    subject = '[CNAP] Pipeline request received without billing account'
     plaintext_msg = '''
-        A new pipeline request was received that did not specify a payment account:
+        A new pipeline request was received that did not specify a billing account:
         -------------------------------------
         %s
         -------------------------------------
     ''' % json.dumps(info_dict)
 
     message_html = '''
-        <html>
-        <body>
-        <p>A new pipeline request was received that did not specify a payment account:</p>
+        
+        
+        <p>A new pipeline request was received that did not specify a billing account:</p>
         <hr>
         <pre>
         %s
         </pre>
         <hr>
-        </body>
-        </html>
+        
+        
     ''' % json.dumps(info_dict)
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
 
@@ -841,16 +894,16 @@ def inform_qbrc_of_bad_pipeline_request(info_dict):
     ''' % json.dumps(info_dict)
 
     message_html = '''
-        <html>
-        <body>
+        
+        
         <p>A new pipeline request was received that specified an unrecognized pipeline:</p>
         <hr>
         <pre>
         %s
         </pre>
         <hr>
-        </body>
-        </html>
+        
+        
     ''' % json.dumps(info_dict)
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
 
@@ -888,22 +941,18 @@ def send_inventory_alert_to_requester(info_dict):
 
     plaintext_msg = '''
         This email is to let you know that your pipeline request was denied since the order exceeded
-        our available inventory.  Please contact the QBRC to resolve this issue.
-
-        qBRC Team (qbrc@hsph.harvard.edu)
+        your available budget.  
+        
+        Please contact the QBRC to resolve this issue..
     '''
 
     message_html = '''
-        <html>
-        <body>
         <p>
         This email is to let you know that your pipeline request was denied since the order exceeded
-        our available inventory.  Please contact the QBRC to resolve this issue.
-        </p>
+        your available budget.  </p>
+        <p>Please contact the QBRC to resolve this issue.</p>
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
     '''
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
@@ -924,16 +973,12 @@ def send_inventory_alert_to_qbrc(info_dict):
     ''' % json.dumps(info_dict)
 
     message_html = '''
-        <html>
-        <body>
         <p>A new pipeline request was received which exceeded our inventory:</p>
         <hr>
         <pre>
         %s
         </pre>
         <hr>
-        </body>
-        </html>
     ''' % json.dumps(info_dict)
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
 
@@ -948,39 +993,47 @@ def general_alert_to_requester(info_dict):
         This email is to let you know that your pipeline request was denied due to an unexpected
         problem.  We are working to resolve this and will be in contact.
 
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
     '''
 
     message_html = '''
-        <html>
-        <body>
         <p>
         This email is to let you know that your pipeline request was denied due to an unexpected
-        problem.  We are working to resolve this and will be in contact.
+        problem.  We are working to resolve this and will be in contact with you.
         </p>
 
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
     '''
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
+def get_itemized_order_info(info_dict):
+    '''
+    Once common place to handle the quantity and cost of an order
+    Returns a tuple of quantity and unit cost or None, indicating a problem
+    '''
+    # prepare some cost estimate:
+    try:
+        qty, unit_cost = calculate_total_purchase(info_dict)
+        return (qty, unit_cost)
+    except InventoryException as ex:
+        send_inventory_alert_to_requester(info_dict)
+        send_inventory_alert_to_qbrc(info_dict)
+        return (None, None)
+    except ProductDoesNotExistException as ex:
+        general_alert_to_requester(info_dict)
+        return (None, None)
 
 def handle_no_payment_number(info_dict):
     '''
     If a pipeline was requested, but the user did not specify an account number
     we end up here.
     '''
-    # prepare some cost estimate:
+    
+    qty, unit_cost = get_itemized_order_info(info_dict)
     try:
-        qty, unit_cost = calculate_total_purchase(info_dict)
-        total_cost = qty * unit_cost
-    except InventoryException as ex:
-        send_inventory_alert_to_requester(info_dict)
-        send_inventory_alert_to_qbrc(info_dict)
-        return
-    except ProductDoesNotExistException as ex:
-        general_alert_to_requester(info_dict)
+        total_cost = qty*unit_cost
+    except TypeError as ex:
         return
 
     # message the user if we have made it this far-- the request
@@ -989,20 +1042,18 @@ def handle_no_payment_number(info_dict):
 
     plaintext_msg = '''
         The pipeline request you have submitted was not associated with a known
-        payment method.  The QBRC will be in contact with you to work out details.
+        billing account.  The qBRC staff will be in contact with you to work out details.
 
         The order requested was:
         - %s (%d at $%.2f each)
         The total cost of the request is $%.2f
 
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
     ''' % (info_dict['PIPELINE'], qty, unit_cost, total_cost)
 
     message_html = '''
-        <html>
-        <body>
         <p>The pipeline request you have submitted was not associated with a known
-        payment method.  The QBRC will be in contact with you to work out details.</p>
+        billing account.  The qBRC staff will be in contact with you to work out details.</p>
         The order requested was:
         <ul>
         <li>
@@ -1010,9 +1061,7 @@ def handle_no_payment_number(info_dict):
         </li>
         </ul>
         <p>The total cost of the request is $%.2f</p>
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
     ''' % (info_dict['PIPELINE'], qty, unit_cost, total_cost)
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
@@ -1029,24 +1078,30 @@ def ask_user_to_resubmit_payment_info(info_dict):
     plaintext_msg = '''
         The pipeline request you have submitted was not associated with a known
         payment method, according to our records.  Please check that you have typed
-        the number correctly.  If you believe this is in error, please contact the QBRC.
+        the number correctly.  If you have not set up a billing account, please contact
+        the qBRC staff.  
 
-        Provided payment number: %s
+        Harvard community members should provide the qBRC with a valid Costing String/GL
+        code.  All others please provide us with a PO#.
 
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Provided billing account: %s
     ''' % info_dict['ACCT_NUM']
 
     message_html = '''
-        <html>
-        <body>
         <p>The pipeline request you have submitted was not associated with a known
         payment method, according to our records.  Please check that you have typed
-        the number correctly.  If you believe this is in error, please contact the QBRC.</p>
+        the number correctly.</p>
 
-        <p>Provided payment number: %s</p>
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>
+        If you have not set up a billing account, please contact
+        the qBRC staff.  
+        </p>
+        <p>
+        Harvard community members should provide the qBRC with a valid Costing String/GL
+        code.  All others please provide us with a PO#.
+        </p>
+
+        <p>Provided billing account: %s</p>
     ''' % info_dict['ACCT_NUM']
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
@@ -1137,8 +1192,75 @@ def create_project_on_cnap(order_obj):
         The project creation call did not return 200.  The error was
         %s
         ''' % r.text
-        handle_exception(None, message = message)
+        raise ProjectCreationException(message)
     
+def send_receipt(order_obj, payment):
+    '''
+    Sends an order summary to the requester, the PI, and the financial coordinator
+    '''
+    subject = '[CNAP] Receipt for order'
+
+    product = order_obj.product
+    purchase = order_obj.purchase 
+    qty = order_obj.quantity
+    unit_cost = product.unit_cost
+    analysis_type = product.name
+    cnap_user = purchase.user
+    user_email = cnap_user.user.email
+    research_group = payment.client
+    pi_email = research_group.pi_email
+    total_cost = qty*unit_cost
+    payment_type = payment.payment_type
+    code = payment.code
+    finance_coord = FinancialCoordinator.objects.get(research_group=research_group)
+    finance_email = finance_coord.contact_email
+
+    plaintext_msg = '''
+        Thank you for placing an order for an analysis on the QBRC's CNAP analysis
+        platform.  Below is a receipt for your purchase:
+
+        Registered email: %s
+        PI email: %s
+
+        Order summary:
+        -------------------------------------------------
+        Analysis type: %s
+        Unit cost (USD): $%.2f
+        Quantity ordered: %d
+        Total cost (USD): $%.2f
+        -------------------------------------------------
+        Payment reference: 
+        Type: %s
+        Account number: %s
+
+        Please email us with any questions.
+    ''' % (user_email, pi_email, analysis_type, unit_cost, qty, total_cost, payment_type, code)
+
+    message_html = '''
+        
+        
+        <p>Thank you for placing an order for an analysis on the QBRC's CNAP analysis
+        platform.  Below is a receipt for your purchase:</p>
+
+        <p>Registered email: %s</p>
+        <p>PI email: %s</p>
+        <hr>
+        <p>Analysis type: %s</p>
+        <p>Unit cost (USD): $%.2f</p>
+        <p>Quantity ordered: %d</p>
+        <p>Total cost (USD): $%.2f</p>
+        <hr>
+        <p>Payment reference: </p>
+        <p>Type: %s</p>
+        <p>Account number: %s</p>
+        <p>Please email us with any questions.</p>
+        
+        
+    ''' % (user_email, pi_email, analysis_type, unit_cost, qty, total_cost, payment_type, code)
+
+    send_email(plaintext_msg, message_html, user_email, subject)  
+    send_email(plaintext_msg, message_html, pi_email, subject)  
+    send_email(plaintext_msg, message_html, finance_email, subject)  
 
 
 def fill_order(info_dict, payment_ref):
@@ -1188,7 +1310,8 @@ def fill_order(info_dict, payment_ref):
     order_obj.order_filled = True
     order_obj.save()
 
-    # CNAP handles sending email to the requester.
+    # CNAP handles sending email to the requester.  Still send an invoice
+    send_receipt(order_obj, payment_ref)
 
 def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
     '''
@@ -1209,22 +1332,18 @@ def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
 
         Please work with the QBRC to resolve this matter.
  
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
 
     ''' % (rejection_reason, info_dict['ACCT_NUM'])
 
     message_html = '''
-        <html>
-        <body>
         <p>The pipeline request you have submitted was not accepted for the following
         reason:</p>
         <hr>
         <p>%s</p>
         <hr>
         <p>The provided payment number was: %s</p>
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
     ''' % (rejection_reason, info_dict['ACCT_NUM'])
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
@@ -1246,13 +1365,11 @@ def ask_pipeline_requester_to_register_lab(info_dict):
         If the email you entered was correct, we first need to register
         this new principal investigator with our system.  
 
-        qBRC Team (qbrc@hsph.harvard.edu)
+        Please email us with any questions.
 
     ''' % (info_dict['PI_EMAIL'])
 
     message_html = '''
-        <html>
-        <body>
         <p>The pipeline request you have submitted was not accepted since the PI
         you listed (%s) was not recognized.  If this was a simple typing error,
         please try again.  
@@ -1260,9 +1377,7 @@ def ask_pipeline_requester_to_register_lab(info_dict):
         <p>
         If the email you entered was correct, we first need to register
         this new principal investigator with our system. </p>
-        <p>qBRC Team <a href="mailto:qbrc@hsph.harvard.edu">qbrc@hsph.harvard.edu</a></p>
-        </body>
-        </html>
+        <p>Please email us with any questions.</p>
     ''' % (info_dict['PI_EMAIL'])
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)

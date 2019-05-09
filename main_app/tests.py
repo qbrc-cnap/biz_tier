@@ -25,7 +25,9 @@ from main_app.tasks import MailQueryException, \
     calculate_total_purchase, \
     ProductDoesNotExistException, \
     handle_no_payment_number, \
-    fill_order
+    fill_order, \
+    create_project_on_cnap, \
+    ProjectCreationException
 
 
 from main_app.models import BaseUser, \
@@ -542,7 +544,9 @@ class AccountRequestTestCase(TestCase):
         mock_send_self_approval_email_to_pi.assert_called_once()
 
 
-    def test_pi_approval_for_own_new_group_creates_resources(self):
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_pi')
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_pi_approval_for_own_new_group_creates_resources(self, mock_send_account_confirmed_email_to_qbrc, mock_send_account_confirmed_email_to_pi):
         '''
         Here we test the case where the PI (who was previously unknown)
         has confirmed by clicking on the email.  Here they are creating
@@ -574,6 +578,9 @@ class AccountRequestTestCase(TestCase):
         self.assertEqual(len(existing_users), 1)
         existing_cnap_users = CnapUser.objects.all()
         self.assertEqual(len(existing_cnap_users), 1)
+
+        mock_send_account_confirmed_email_to_pi.assert_called_once()
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
 
 
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
@@ -1164,6 +1171,76 @@ class PipelineRequestTestCase(TestCase):
     def tearDown(self):
         pass
 
+
+    @mock.patch('main_app.tasks.requests.post')
+    def test_handles_failure_to_create_cnap_project(self, mock_post):
+        '''
+        This handles the case where the CNAP server returns something other than 200 when the request
+        is made to create a new project.
+        '''
+        mock_return = mock.MagicMock(status_code=500)
+        mock_post.return_value = mock_return
+
+        #setup the order:
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+
+        u2 = CnapUser.objects.create(user=u)
+        u2.research_group.add(rg)
+        u2.save()
+
+        # create a product:
+        product = Product.objects.create(
+            name = 'some pipeline',
+            is_quantity_limited = False,
+            cnap_workflow_pk = 1,
+            unit_cost = 10.00
+        )
+        purchase = Purchase.objects.create(user=u2)
+        order = Order.objects.create(
+            product = product,
+            purchase = purchase,
+            quantity=5
+        )
+
+        payment = Payment.objects.create(
+            client=rg,
+            code = '1234',
+            payment_amount = 100.00
+        )
+        with self.assertRaises(ProjectCreationException):
+            create_project_on_cnap(order)
+
+
     @mock.patch('main_app.tasks.ask_requester_to_register_first')
     def test_pipeline_request_without_account_rejected(self, mock_ask_requester_to_register_first):
         '''
@@ -1741,7 +1818,8 @@ class PipelineRequestTestCase(TestCase):
         mock_inform_qbrc_of_bad_pipeline_request.assert_called_once()
 
     @mock.patch('main_app.tasks.create_project_on_cnap')
-    def test_valid_order_creates_proper_objects(self, mock_create_project_on_cnap):
+    @mock.patch('main_app.tasks.send_receipt')
+    def test_valid_order_creates_proper_objects(self, mock_send_receipt, mock_create_project_on_cnap):
         '''
         Test that all the proper things are created when we finally fill an order
         '''
@@ -1766,6 +1844,12 @@ class PipelineRequestTestCase(TestCase):
             state = self.pi_info_dict['STATE'],
             postal_code = self.pi_info_dict['POSTAL_CODE'],
             country = self.pi_info_dict['COUNTRY']
+        )
+
+        fc = FinancialCoordinator.objects.create(
+            contact_name = 'John Finance',
+            contact_email = 'finance@foo.com',
+            research_group = rg
         )
 
         # associate those users with the research group:
@@ -1814,6 +1898,7 @@ class PipelineRequestTestCase(TestCase):
         self.assertEqual(updated_product.quantity, 19)
 
         mock_create_project_on_cnap.assert_called_once()
+        mock_send_receipt.assert_called_once()
 
 class QualtricsSurveyTestCase(TestCase):
     '''

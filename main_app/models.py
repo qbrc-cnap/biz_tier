@@ -160,6 +160,9 @@ class Payment(models.Model):
     # when was the payment made:
     payment_date = models.DateTimeField(null=True)
 
+    # expiration date for the payment
+    payment_expiration_date = models.DateField(null=True)
+
     # to which research group is this payment applied:
     client = models.ForeignKey(ResearchGroup, on_delete=models.CASCADE)
 
