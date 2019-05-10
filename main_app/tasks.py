@@ -232,7 +232,7 @@ def send_account_confirmed_email_to_pi(pending_user_instance):
         on the CNAP platform at %s using
         password "%s"
 
-        *IMPORTANT* You will need to provide the qBRC staff billing information such as a
+        When you request analysis pipelines you will need to provide billing information such as a
         GL Code/Costing String or PO number before analyses can be ordered. 
         A quote will be emailed to you automatically after a project request if billing information is not available.
 
@@ -250,7 +250,7 @@ def send_account_confirmed_email_to_pi(pending_user_instance):
         </p>
 
         <p>
-        <b>IMPORTANT</b> You will need to provide the qBRC staff billing information such as a
+        When you request analysis pipelines you will need to provide billing information such as a
         GL Code/Costing String or PO number before analyses can be ordered. 
         A quote will be emailed to you automatically after a project request if billing information is not available.</p>
 
@@ -1038,11 +1038,11 @@ def handle_no_payment_number(info_dict):
 
     # message the user if we have made it this far-- the request
     # is otherwise fine
-    subject = '[CNAP] Pipeline request-- more information needed'
+    subject = '[CNAP] Pipeline request-- billing information needed'
 
     plaintext_msg = '''
         The pipeline request you have submitted was not associated with a known
-        billing account.  The qBRC staff will be in contact with you to work out details.
+        billing account.  Please contact the qBRC staff to submit billing details.
 
         The order requested was:
         - %s (%d at $%.2f each)
@@ -1053,7 +1053,7 @@ def handle_no_payment_number(info_dict):
 
     message_html = '''
         <p>The pipeline request you have submitted was not associated with a known
-        billing account.  The qBRC staff will be in contact with you to work out details.</p>
+        billing account.  Please contact the qBRC staff to submit billing details.</p>
         The order requested was:
         <ul>
         <li>
