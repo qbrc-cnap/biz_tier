@@ -1082,7 +1082,7 @@ def ask_user_to_resubmit_payment_info(info_dict):
         the qBRC staff.  
 
         Harvard community members should provide the qBRC with a valid Costing String/GL
-        code.  All others please provide us with a PO#.
+        code.  All others please provide us with a purchase order.
 
         Provided billing account: %s
     ''' % info_dict['ACCT_NUM']
@@ -1098,7 +1098,7 @@ def ask_user_to_resubmit_payment_info(info_dict):
         </p>
         <p>
         Harvard community members should provide the qBRC with a valid Costing String/GL
-        code.  All others please provide us with a PO#.
+        code.  All others please provide us with a purchase order.
         </p>
 
         <p>Provided billing account: %s</p>
