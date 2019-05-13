@@ -114,6 +114,7 @@ class GLApprovalView(View):
 
     def get(self, request, *args, **kwargs):
         approval_key = kwargs['approval_key']
+        print(approval_key)
         try:
             pending_request = PendingPipelineRequest.objects.get(approval_key = approval_key)
             json_info = json.loads(pending_request.info_json)
@@ -132,7 +133,7 @@ class GLApprovalView(View):
             context['requester_email'] = requester_email
             context['pi_name'] = pi_name
             context['pi_email'] = pi_email 
-            return render(request, 'main_app/gl_code_approval.html', {'formatted_json_str': formatted_json_str, })
+            return render(request, 'main_app/gl_code_approval.html', context)
         except PendingPipelineRequest.DoesNotExist:
             return HttpResponseBadRequest()
 
@@ -142,9 +143,13 @@ class GLApprovalView(View):
         A finance person has submitted the form, which could be approved or rejected
         '''
         try:
+            approval_key = kwargs['approval_key']
+            print(approval_key)
             pending_request = PendingPipelineRequest.objects.get(approval_key = approval_key)
             pending_request_pk = pending_request.pk
         except PendingPipelineRequest.DoesNotExist:
+            return HttpResponseBadRequest()
+        except Exception:
             return HttpResponseBadRequest()
 
         # the post endpoint was ok.  Did they actually approve the request?

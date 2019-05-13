@@ -571,6 +571,11 @@ def get_email_body(message_uid, message):
         # if anything went wrong, we do not want to accidentally mark this email
         # as processed, so delete the database object:
         p.delete()
+
+        print('message: %s' %  message)
+        print('message[1]: %s' %  message[1])
+        print('message_uid: %s' %  message_uid)
+
         raise ex
 
 
@@ -1501,7 +1506,10 @@ def handle_gl_code(info_dict):
         p.save()
 
         approval_url = reverse('gl_code_approval', args=[approval_key,])
-        inform_harvard_finance_staff_of_gl_code(info_dict, approval_url)
+        current_site = Site.objects.get_current()
+        domain = current_site.domain
+        full_url = 'https://%s%s' % (domain, approval_url)
+        inform_harvard_finance_staff_of_gl_code(info_dict, full_url)
 
         # let the requester know that it is pending verification
         inform_user_of_gl_code_validation(info_dict)
