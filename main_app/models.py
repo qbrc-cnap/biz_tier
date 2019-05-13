@@ -125,6 +125,8 @@ class ResearchGroup(models.Model):
     postal_code = models.CharField(max_length=10, null=True, blank=True)
     country = models.CharField(max_length=100, null=True, blank=True)
 
+    def __str__(self):
+        return 'PI: %s' % self.pi_email
 
 class FinancialCoordinator(models.Model):
     '''
