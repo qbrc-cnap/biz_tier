@@ -69,6 +69,22 @@ class PendingUser(models.Model):
     request_date = models.DateField(auto_now_add = True)
 
 
+class PendingPipelineRequest(models.Model):
+    '''
+    This class is used to temporarily "stash" requests for pipelines while we await
+    some sort of verification (e.g. verification of GL code)
+    '''
+
+    # a JSON-format string holding the info we parsed from the email.
+    info_json = models.CharField(max_length=10000, null=False, blank=False)
+
+    # a long hash invitation key, used to generate links for approval
+    approval_key = models.CharField(max_length=100, null=True, blank=True)
+
+    # the date of the request so we may expire those that are old
+    request_date = models.DateField(auto_now_add = True)
+
+    
 class ProcessedEmail(models.Model):
     '''
     We query the IMAP server to get emails with a particular subject.  Since these emails go to our inboxes, we cannot 
@@ -170,7 +186,7 @@ class Payment(models.Model):
 
     # for each payment we create a code such that lab members can reference that code
     # during checkout and that will associate their purchase this payment
-    code = models.CharField(max_length=20, blank=True, null=True)
+    code = models.CharField(max_length=50, blank=True, null=True)
 
     # the amount of the payment:
     # allow null for an open PO, or similar

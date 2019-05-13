@@ -1,0 +1,28 @@
+<html>
+    <head>
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    </head>
+    <body>
+        <h2>
+            The following account request was received:
+        </h2>
+        <ul>
+            <li>Requester name/email: {{requester_name}} ({{requester_email}})</li>
+            <li>PI name/email: {{pi_name}} ({{pi_email}})</li>
+            <li>GL code: {{gl_clde}}</li>
+        </ul>
+        <p>Please confirm the validity of the GL code by selecting the checkbox and submitting below.        </p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="checkbox">
+            <div class="form-group form-check">
+                    <input type="checkbox" class="form-check-input" id="approve" name="approve">
+                    <label class="form-check-label" for="approve">I confirm the GL code above is valid</label>
+            </div>
+            <button type="submit" class="btn btn-primary">Submit</button>
+        </form>
+
+        <!--<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+        <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>-->
+    </body>
+</html>

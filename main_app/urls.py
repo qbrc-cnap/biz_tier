@@ -14,6 +14,7 @@ router.register(r'orders', views.OrderViewSet)
 
 urlpatterns = [
     path('accounts/staff-approve/<int:pk>', views.StaffApprovalView.as_view(), name='staff_account_approval'),
+    path('accounts/approve-gl-code/<str:approval_key>', views.GLApprovalView.as_view(), name='gl_code_approval'),
     path('accounts/approve/<str:approval_key>', views.PIApprovalView.as_view(), name='pi_account_approval'),
     path('api', include(router.urls)),
 ]

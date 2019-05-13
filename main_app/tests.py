@@ -27,7 +27,9 @@ from main_app.tasks import MailQueryException, \
     handle_no_payment_number, \
     fill_order, \
     create_project_on_cnap, \
-    ProjectCreationException
+    ProjectCreationException, \
+    handle_gl_code, \
+    gl_code_approval
 
 
 from main_app.models import BaseUser, \
@@ -40,7 +42,8 @@ from main_app.models import BaseUser, \
     Budget, \
     Product, \
     Order, \
-    Purchase
+    Purchase, \
+    PendingPipelineRequest
 
 class EmailBodyParser(TestCase):
     def setUp(self):
@@ -1132,7 +1135,9 @@ class PipelineRequestTestCase(TestCase):
             "ACCT_NUM":"1234",
             "NUM_OF_SAMPLE":"6",
             "PIPELINE": "Single End RNASeq Analysis",
-            "SEQ_TYPE":"Illumina Single End 75bp"
+            "SEQ_TYPE":"Illumina Single End 75bp",
+            "GL_CODE": "",
+            "HARVARD_APPOINTMENT": "Yes"
         }
 
         self.postdoc_info_dict_no_acct = {
@@ -1143,7 +1148,25 @@ class PipelineRequestTestCase(TestCase):
             "ACCT_NUM":"",
             "NUM_OF_SAMPLE":"6",
             "PIPELINE": "Single End RNASeq Analysis",
-            "SEQ_TYPE":"Illumina Single End 75bp"
+            "SEQ_TYPE":"Illumina Single End 75bp",
+            "GL_CODE": "",
+            "HARVARD_APPOINTMENT": "Yes"
+        }
+
+        # in the case of a harvard PI, they can specify 'no'
+        # for the account number, but can submit a gl code (which will need 
+        # verification by  Harvard people)
+        self.postdoc_info_dict_with_gl_code = {
+            "REGISTERED":"Yes",
+            "EMAIL": settings.TEST_POSTDOC_EMAIL,
+            "PI_EMAIL":settings.TEST_PI_EMAIL,
+            "HAVE_ACCT_NUM":"No",
+            "ACCT_NUM":"",
+            "NUM_OF_SAMPLE":"6",
+            "PIPELINE": "Single End RNASeq Analysis",
+            "SEQ_TYPE":"Illumina Single End 75bp",
+            "GL_CODE": "1234",
+            "HARVARD_APPOINTMENT": "Yes"
         }
 
         self.pi_info_dict = {
@@ -1357,6 +1380,181 @@ class PipelineRequestTestCase(TestCase):
         handle_pipeline_request_email(self.postdoc_info_dict_no_acct)
         mock_handle_no_payment_number.assert_called_once()
         mock_inform_qbrc_of_request_without_payment_number.assert_called_once()
+
+
+    @mock.patch('main_app.tasks.handle_gl_code')
+    def test_pipeline_request_from_harvard_person_with_gl_code_case1(self,
+        mock_handle_gl_code):
+        '''
+        This tests the case where a regular user (with an account)
+        requests a pipeline, but does not have a payment code.  They DO, however
+        have a GL code
+
+        Here we only check that the handler method is called
+        '''
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+        u2 = CnapUser.objects.create(user=u)
+        u2.research_group.add(rg)
+        u2.save()
+
+        handle_pipeline_request_email(self.postdoc_info_dict_with_gl_code)
+        mock_handle_gl_code.assert_called_once()
+
+    @mock.patch('main_app.tasks.inform_harvard_finance_staff_of_gl_code')
+    @mock.patch('main_app.tasks.inform_user_of_gl_code_validation')
+    def test_pipeline_request_from_harvard_person_with_gl_code_case2(self,
+        mock_inform_user_of_gl_code_validation,
+        mock_inform_harvard_finance_staff_of_gl_code):
+        '''
+        This tests the case where a regular user (with an account)
+        requests a pipeline, but does not have a payment code.  They DO, however
+        have a GL code
+
+        We check that we would send a verification email to the Harvard finance people
+        and also send them and email letting them know the project is held
+        until the GL code is approved
+        '''
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+        u2 = CnapUser.objects.create(user=u)
+        u2.research_group.add(rg)
+        u2.save()
+
+        # query to see that a PendingPipelineRequest was initially zero
+        p = PendingPipelineRequest.objects.all()
+        self.assertEqual(len(p), 0)
+
+        # call the method:
+        handle_gl_code(self.postdoc_info_dict_with_gl_code)
+        mock_inform_user_of_gl_code_validation.assert_called_once()
+        mock_inform_harvard_finance_staff_of_gl_code.assert_called_once()
+        
+        # query to see that a PendingPipelineRequest was created
+        p = PendingPipelineRequest.objects.all()
+        self.assertEqual(len(p), 1)
+
+        # check that no orders were created:
+        o = Order.objects.all()
+        self.assertEqual(len(o), 0)
+
+    @mock.patch('main_app.tasks.fill_order')
+    def test_gl_code_approved_by_finance(self, mock_fill_order):
+        '''
+        This tests the case where someone from finance has approved the GL 
+        code submitted as part of the request
+        '''   
+
+        u = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_POSTDOC_EMAIL   
+        )
+                # create a user who is a PI:
+        pi_user = BaseUser.objects.create(
+            first_name = 'John',
+            last_name = 'Doe',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # create their research group:
+        org = Organization.objects.create(name=self.pi_info_dict['ORGANIZATION'])
+        rg = ResearchGroup.objects.create(
+            organization = org,
+            pi_email = self.pi_info_dict['PI_EMAIL'],
+            pi_name = '%s %s' % (self.pi_info_dict['PI_FIRST_NAME'], self.pi_info_dict['PI_LAST_NAME']),
+            has_harvard_appointment = True if self.pi_info_dict['HARVARD_APPOINTMENT'].lower() == 'y' else False,
+            department = self.pi_info_dict['DEPARTMENT'],
+            address_lines = self.pi_info_dict['ADDRESS'],
+            city = self.pi_info_dict['CITY'],
+            state = self.pi_info_dict['STATE'],
+            postal_code = self.pi_info_dict['POSTAL_CODE'],
+            country = self.pi_info_dict['COUNTRY']
+        )
+
+        # associate those PI with their research group:
+        u1 = CnapUser.objects.create(user=pi_user)
+        u1.research_group.add(rg)
+        u1.save()
+        u2 = CnapUser.objects.create(user=u)
+        u2.research_group.add(rg)
+        u2.save()
+
+        p = PendingPipelineRequest.objects.create(
+            info_json = json.dumps(self.postdoc_info_dict_with_gl_code),
+            approval_key = 'abcd'
+        )
+        pk = p.pk
+
+        gl_code_approval(pk, True)
+        mock_fill_order.assert_called_once()
+
+        # see that a payment was created:
+        payments = Payment.objects.all()
+        self.assertEqual(len(payments), 1)
+
+        # confirm that the PendingPipelineRequest was deleted
+        p = PendingPipelineRequest.objects.all()
+        self.assertEqual(len(p), 0)
+
 
     @mock.patch('main_app.tasks.ask_user_to_resubmit_payment_info')
     def test_pipeline_request_with_bad_code(self, mock_ask_user_to_resubmit_payment_info):

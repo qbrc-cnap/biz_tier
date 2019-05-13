@@ -1,5 +1,6 @@
 import imaplib
 import email
+import datetime
 import ssl
 import re
 import bs4
@@ -27,7 +28,8 @@ from main_app.models import ProcessedEmail, \
     Budget, \
     Product, \
     Order, \
-    Purchase
+    Purchase, \
+    PendingPipelineRequest
 
 class MailQueryException(Exception):
     pass
@@ -78,7 +80,9 @@ REQUIRED_PIPELINE_CREATION_KEYS = {
     'ACCT_NUM',
     'NUM_OF_SAMPLE',
     'PIPELINE',
-    'SEQ_TYPE'
+    'SEQ_TYPE',
+    'GL_CODE',
+    'HARVARD_APPOINTMENT'
 }
 
 # flags for common reference
@@ -1261,6 +1265,7 @@ def send_receipt(order_obj, payment):
     send_email(plaintext_msg, message_html, user_email, subject)  
     send_email(plaintext_msg, message_html, pi_email, subject)  
     send_email(plaintext_msg, message_html, finance_email, subject)  
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)  
 
 
 def fill_order(info_dict, payment_ref):
@@ -1312,6 +1317,7 @@ def fill_order(info_dict, payment_ref):
 
     # CNAP handles sending email to the requester.  Still send an invoice
     send_receipt(order_obj, payment_ref)
+
 
 def inform_user_of_invalid_order(info_dict, payment_ref, rejection_reason):
     '''
@@ -1382,6 +1388,125 @@ def ask_pipeline_requester_to_register_lab(info_dict):
 
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
+
+def inform_harvard_finance_staff_of_gl_code(info_dict, approval_url):
+    '''
+    This constructs an email to the Harvard finance people so they can validate the GL code provided
+    '''
+
+    research_group = ResearchGroup.objects.get(pi_email=info_dict['PI_EMAIL'])
+    finance_contact = FinancialCoordinator.objects.get(research_group=research_group)
+    user = get_user_model().objects.get(email=info_dict['EMAIL'])
+
+    subject = 'GL code verification needed'
+
+    plaintext_msg = '''
+        Hello,
+
+        We received the following GL code as payment for one of our automated
+        data processing pipelines.  The code and associated client information was:
+
+        GL code: %s
+        Principal investigator email: %s
+        Lab finance contact: %s (%s)
+        Requester information: %s %s (%s)
+
+        To approve or reject the request, please go to: %s
+
+    ''' % (info_dict['GL_CODE'], \
+            info_dict['PI_EMAIL'], \
+            finance_contact.contact_name, \
+            finance_contact.contact_email, \
+            user.first_name, \
+            user.last_name, \
+            user.email, \
+            approval_url \
+        )
+
+    message_html = '''
+        <p>Hello,</p>
+        <p>We received the following GL code as payment for one of our automated
+        data processing pipelines.  The code and associated client information was:</p>
+        <p>GL code: %s</p>
+        <p>Principal investigator email: %s</p>
+        <p>Lab finance contact: %s (%s)</p>
+        <p>Requester information: %s %s (%s)</p>
+        <p>To approve or reject the request, please go to: <a href="%s">%s</a>
+</p>
+
+    ''' % (info_dict['GL_CODE'], \
+            info_dict['PI_EMAIL'], \
+            finance_contact.contact_name, \
+            finance_contact.contact_email, \
+            user.first_name, \
+            user.last_name, \
+            user.email, \
+            approval_url, \
+            approval_url \
+    )
+
+    send_email(plaintext_msg, message_html, settings.HARVARD_FINANCE_CONTACT, subject)
+
+
+def inform_user_of_gl_code_validation(info_dict):
+    '''
+    This sends an email to the requester so they know the GL code is being verified.
+    '''
+    subject = '[CNAP] GL code verification pending'
+
+    plaintext_msg = '''
+        This email is to let you know that we have received your request for an analysis
+        pipeline, and we have forwarded the request to the appropriate financial
+        contacts to verify the submitted GL code: %s
+
+        If the code is approved, you will receive a confirmation email and instructions
+        on accessing your project on the CNAP.
+    ''' % (
+            info_dict['GL_CODE']
+        )
+
+    message_html = '''
+        <p>
+        This email is to let you know that we have received your request for an analysis
+        pipeline, and we have forwarded the request to the appropriate financial
+        contacts to verify the submitted GL code: %s
+        </p>
+        <p>If the code is approved, you will receive a confirmation email and instructions
+        on accessing your project on the CNAP.</p>
+    ''' % (info_dict['GL_CODE'])
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
+
+
+def handle_gl_code(info_dict):
+    '''
+    This handles the case where a Harvard-affiliated person has submitted a GL code
+    '''
+    try:
+        # first check if we know this code already:
+        payment = Payment.objects.get(code = info_dict['GL_CODE'])
+        fill_order(info_dict, payment)
+
+    except Payment.DoesNotExist:
+        # no payment was found-- need to verify it with Harvard finance people
+
+        # create a database instance to save this info.  This includes generation of an approval url
+        salt = uuid.uuid4().hex
+        s = (info_dict['EMAIL'] + salt).encode('utf-8')
+        approval_key = hashlib.sha256(s).hexdigest()
+        p = PendingPipelineRequest.objects.create(
+            info_json = json.dumps(info_dict),
+            approval_key = approval_key
+        )
+        p.save()
+
+        approval_url = reverse('gl_code_approval', args=[approval_key,])
+        inform_harvard_finance_staff_of_gl_code(info_dict, approval_url)
+
+        # let the requester know that it is pending verification
+        inform_user_of_gl_code_validation(info_dict)
+
+
 def handle_pipeline_request_email(info_dict):
     '''
     This is the starting point for business logic related to pipeline requests
@@ -1421,12 +1546,29 @@ def handle_pipeline_request_email(info_dict):
     # if we are here, then we know about the user and they have correctly associated with their known PI.
     # Check if they have an account string
     if info_dict['HAVE_ACCT_NUM'].lower()[0] == 'n':
-        # send a message with cost info, etc.
-        handle_no_payment_number(info_dict)
 
-        # email QBRC indicating we have a request from a valid user/lab without acct string
-        inform_qbrc_of_request_without_payment_number(info_dict)
-        return
+        # check if they are harvard-affiliated.  
+        if info_dict['HARVARD_APPOINTMENT'].lower()[0] == 'n':
+            # send a message with cost info, etc.
+            handle_no_payment_number(info_dict)
+
+            # email QBRC indicating we have a request from a valid user/lab without acct string
+            inform_qbrc_of_request_without_payment_number(info_dict)
+            return
+        else:
+            # harvard-affiliated (allegedly) and no account number.  Could have provided a GL code, however
+            gl_code = info_dict['GL_CODE']
+
+            if len(gl_code) == 0:
+                handle_no_payment_number(info_dict)
+                inform_qbrc_of_request_without_payment_number(info_dict)
+                return
+            else:
+                # have a harvard-affiliated person with a non-empty GL code
+                handle_gl_code(info_dict)
+                return
+
+
 
     # allegedly have an account number from a valid user at this point.  Check that the acct string
     # is indeed valid.
@@ -1546,6 +1688,63 @@ def get_mailbox():
     except Exception as ex:
         raise MailQueryException('Could not select INBOX.  Reason was: %s' % str(ex))
     return mail
+
+
+def handle_gl_code_rejected(info_dict):
+    '''
+    This handles the case where a Harvard finance person rejects the GL code for whatever reason
+    We inform the requester and the QBRC
+    '''
+    subject = '[CNAP] GL code rejected-- attention needed'
+
+    plaintext_msg = '''
+        The pipeline request you have submitted with the following GL code was rejected.  If the 
+        GL code was incorrectly entered, please try again.
+
+        %s
+
+    ''' % (info_dict['GL_CODE'])
+
+    message_html = '''
+        <p>The pipeline request you have submitted with the following GL code was rejected.  If the 
+        GL code was incorrectly entered, please try again.</p>
+        <p>%s</p>
+    ''' % (info_dict['GL_CODE'])
+
+    send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)  
+    send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)  
+
+
+@task(name='gl_code_approval')
+def gl_code_approval(pending_request_pk, was_approved):
+    '''
+    This function is called when a Harvard financial person clicks on the approval link for validating
+    the GL code.  
+
+    The first arg is an integer giving the primary key of a PendingPipelineRequest instance
+    The second arg is a bool indicating whether the finance person approved the code
+    '''
+    request = PendingPipelineRequest.objects.get(pk=pending_request_pk)
+    info_dict = json.loads(request.info_json)
+    research_group = ResearchGroup.objects.get(pi_email = info_dict['PI_EMAIL'])
+    
+    if was_approved:
+        # create payment--
+        payment = Payment.objects.create(
+            payment_type = 'CS',
+            number = info_dict['GL_CODE'],
+            code = info_dict['GL_CODE'],
+            client = research_group,
+            payment_date = datetime.datetime.now()
+        )
+        payment.save()
+        fill_order(info_dict, payment)
+    else:
+        # the GL code was rejected.  Inform QBRC and client
+        handle_gl_code_rejected(info_dict)
+        
+    # regardless of the approval status, delete the PendingPipelineRequest    
+    request.delete()
 
 
 @task(name='check_for_qualtrics_survey_results')

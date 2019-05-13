@@ -7,6 +7,8 @@ from django.http import HttpResponseBadRequest, \
     HttpResponse
 from django.views import View
 from rest_framework import viewsets
+from django.contrib.auth import get_user_model
+
 
 import main_app.tasks as main_tasks
 
@@ -18,7 +20,8 @@ from main_app.models import \
     Purchase, \
     Product, \
     Order, \
-    PendingUser
+    PendingUser, \
+    PendingPipelineRequest
 
 from main_app.serializers import \
     OrganizationSerializer, \
@@ -105,3 +108,52 @@ class PIApprovalView(View):
             return render(request, 'main_app/pi_approval_confirmation.html', {})
         except PendingUser.DoesNotExist:
             return HttpResponseBadRequest()
+
+
+class GLApprovalView(View):
+
+    def get(self, request, *args, **kwargs):
+        approval_key = kwargs['approval_key']
+        try:
+            pending_request = PendingPipelineRequest.objects.get(approval_key = approval_key)
+            json_info = json.loads(pending_request.info_json)
+            gl_code = json_info['GL_CODE']
+
+            requester_email = json_info['EMAIL']
+            pi_email = json_info['PI_EMAIL']
+            requester_user = get_user_model().objects.get(email=requester_email)
+            pi_user = get_user_model().objects.get(email=pi_email)
+            requester_name = '%s %s' % (requester_user.first_name, requester_user.last_name)
+            pi_name = '%s %s' % (pi_user.first_name, pi_user.last_name)
+
+            context = {}
+            context['gl_code'] = gl_code
+            context['requester_name'] = requester_name
+            context['requester_email'] = requester_email
+            context['pi_name'] = pi_name
+            context['pi_email'] = pi_email 
+            return render(request, 'main_app/gl_code_approval.html', {'formatted_json_str': formatted_json_str, })
+        except PendingPipelineRequest.DoesNotExist:
+            return HttpResponseBadRequest()
+
+
+    def post(self, request, *args, **kwargs):
+        '''
+        A finance person has submitted the form, which could be approved or rejected
+        '''
+        try:
+            pending_request = PendingPipelineRequest.objects.get(approval_key = approval_key)
+            pending_request_pk = pending_request.pk
+        except PendingPipelineRequest.DoesNotExist:
+            return HttpResponseBadRequest()
+
+        # the post endpoint was ok.  Did they actually approve the request?
+        try:
+            approved = request.POST['approved']
+            approved = True
+        except Exception as ex:
+            approved = False
+
+        main_tasks.gl_code_approval.delay(pending_request_pk, approved)
+        return HttpResponse('Thanks!  Your response has been recorded.')
+
