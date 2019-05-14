@@ -114,7 +114,7 @@ def send_self_approval_email_to_pi(pending_user_instance):
 
         Please email us with any questions.
 
-    ''' % (json.dumps(user_info), full_url)
+    ''' % (full_url)
 
     message_html = '''
 
@@ -125,7 +125,7 @@ def send_self_approval_email_to_pi(pending_user_instance):
         are created without proper confirmation.</p> 
 
         <p>Please email us with any questions.</p>
-    ''' % (json.dumps(user_info), full_url)
+    ''' % (full_url)
     send_email(plaintext_msg, message_html, pi_email, subject)
 
 
@@ -241,7 +241,7 @@ def send_account_confirmed_email_to_pi(pending_user_instance):
         A quote will be emailed to you automatically after a project request if billing information is not available.
 
         Please email us with any questions.
-    ''' % (settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+    ''' % (settings.QUALTRICS_PIPELINE_CREATION_URL, settings.QUALTRICS_PIPELINE_CREATION_PWD)
 
     message_html = '''
         
@@ -261,7 +261,7 @@ def send_account_confirmed_email_to_pi(pending_user_instance):
         <p>Please email us with any questions.</p>
         
         
-    ''' % (settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+    ''' % (settings.QUALTRICS_PIPELINE_CREATION_URL, settings.QUALTRICS_PIPELINE_CREATION_URL, settings.QUALTRICS_PIPELINE_CREATION_PWD)
 
     send_email(plaintext_msg, message_html, pi_email, subject)
 
@@ -287,7 +287,7 @@ def send_account_confirmed_email_to_requester(pending_user_instance):
         A quote will be emailed to you automatically after a project request if billing information is not available.
 
         Please email us with any questions.
-    ''' % (pi_email, settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+    ''' % (pi_email, settings.QUALTRICS_PIPELINE_CREATION_URL, settings.QUALTRICS_PIPELINE_CREATION_PWD)
 
 
     message_html = '''
@@ -309,7 +309,7 @@ def send_account_confirmed_email_to_requester(pending_user_instance):
         <p>Please email us with any questions.</p>
         
         
-    ''' % (pi_email, settings.QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_URL, QUALTRICS_PIPELINE_CREATION_PWD)
+    ''' % (pi_email, settings.QUALTRICS_PIPELINE_CREATION_URL, settings.QUALTRICS_PIPELINE_CREATION_URL, settings.QUALTRICS_PIPELINE_CREATION_PWD)
 
 
     send_email(plaintext_msg, message_html, requesting_user_email, subject)
