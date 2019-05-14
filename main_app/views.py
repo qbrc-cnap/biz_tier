@@ -162,3 +162,56 @@ class GLApprovalView(View):
         main_tasks.gl_code_approval.delay(pending_request_pk, approved)
         return HttpResponse('Thanks!  Your response has been recorded.')
 
+
+class BillingEntryView(View):
+
+    def get(self, request, *args, **kwargs):
+        approval_key = kwargs['approval_key']
+        print(approval_key)
+        try:
+            pending_request = PendingPipelineRequest.objects.get(approval_key = approval_key)
+            json_info = json.loads(pending_request.info_json)
+
+            payment_choices = Payment.PAYMENT_TYPES # e.g. (('CC', 'Credit card'), ('PO', 'Purchase order (PO)'), ('CS', 'Costing string'))
+
+            gl_code = json_info['GL_CODE']
+
+            requester_email = json_info['EMAIL']
+            pi_email = json_info['PI_EMAIL']
+            requester_user = get_user_model().objects.get(email=requester_email)
+            pi_user = get_user_model().objects.get(email=pi_email)
+            requester_name = '%s %s' % (requester_user.first_name, requester_user.last_name)
+            pi_name = '%s %s' % (pi_user.first_name, pi_user.last_name)
+
+            context = {}
+            context['payment_choices'] = payment_choices
+            context['requester_name'] = requester_name
+            context['requester_email'] = requester_email
+            context['pi_name'] = pi_name
+            context['pi_email'] = pi_email 
+            context['info_json'] = json.dumps(json_info, indent=4)
+            return render(request, 'main_app/billing_entry.html', context)
+        except PendingPipelineRequest.DoesNotExist:
+            return HttpResponseBadRequest()
+
+
+    def post(self, request, *args, **kwargs):
+        try:
+            approval_key = kwargs['approval_key']
+            pending_request = PendingPipelineRequest.objects.get(approval_key = approval_key)
+            pending_request_pk = pending_request.pk
+        except PendingPipelineRequest.DoesNotExist:
+            return HttpResponseBadRequest()
+        except Exception:
+            return HttpResponseBadRequest()
+
+        # the post endpoint was ok. extract the form data
+        try:
+            payment_type = request.POST['payment_type']
+            payment_number = request.POST['payment_number']
+        except Exception as ex:
+            return HttpResponse('Inputs were not correct.')
+
+        main_tasks.add_billing_details.delay(pending_request_pk, payment_type, payment_number)
+        return HttpResponse('Complete.')
+

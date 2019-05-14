@@ -867,7 +867,55 @@ def ask_requester_to_associate_with_pi_first(info_dict):
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
 
+@task('add_billing_details')
+def add_billing_details(pending_request_pk, payment_type, payment_number):
+    '''
+    This function is reached when QBRC staff needs to enter billing details.  The request details
+    were saved to the database, so we can pickup from there.
+    '''
+    request = PendingPipelineRequest.objects.get(pk=pending_request_pk)
+    info_dict = json.loads(request.info_json)
+    research_group = ResearchGroup.objects.get(pi_email = info_dict['PI_EMAIL'])
+    
+    # create payment--
+    payment = Payment.objects.create(
+        payment_type = payment_type,
+        number = payment_number,
+        code = payment_number,
+        client = research_group,
+        payment_date = datetime.datetime.now()
+    )
+    payment.save()
+    fill_order(info_dict, payment)
+        
+    # regardless of the approval status, delete the PendingPipelineRequest    
+    request.delete()
+
+
 def inform_qbrc_of_request_without_payment_number(info_dict):
+    '''
+    As it states, this function sends an email to the QBRC to let us know that someone
+    requested a pipeline, but did not provide a billing account.  This can happen if
+    the ACCT_NUM is empty, or a GL code was empty.
+
+    We save the request and create an approval URL so we can resume the request once we
+    receive billing info
+    '''
+    # create a database instance to save this info.  This includes generation of an approval url
+    salt = uuid.uuid4().hex
+    s = (info_dict['EMAIL'] + salt).encode('utf-8')
+    approval_key = hashlib.sha256(s).hexdigest()
+    p = PendingPipelineRequest.objects.create(
+        info_json = json.dumps(info_dict),
+        approval_key = approval_key
+    )
+    p.save()
+
+    approval_url = reverse('missing_billing_account_resume', args=[approval_key,])
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    full_url = 'https://%s%s' % (domain, approval_url)
+
 
     subject = '[CNAP] Pipeline request received without billing account'
     plaintext_msg = '''
@@ -875,7 +923,11 @@ def inform_qbrc_of_request_without_payment_number(info_dict):
         -------------------------------------
         %s
         -------------------------------------
-    ''' % json.dumps(info_dict)
+
+        The billing info can be entered here, when it is ready:
+        %s
+
+    ''' % (json.dumps(info_dict), full_url)
 
     message_html = '''
         
@@ -886,9 +938,11 @@ def inform_qbrc_of_request_without_payment_number(info_dict):
         %s
         </pre>
         <hr>
-        
-        
-    ''' % json.dumps(info_dict)
+        <p>
+        The billing info can be entered here, when it is ready:
+        </p>
+        <p><a href="%s">%s</a></p>
+    ''' % (json.dumps(info_dict), full_url, full_url)
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)
 
 
