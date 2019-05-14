@@ -867,7 +867,7 @@ def ask_requester_to_associate_with_pi_first(info_dict):
     send_email(plaintext_msg, message_html, info_dict['EMAIL'], subject)
 
 
-@task('add_billing_details')
+@task(name='add_billing_details')
 def add_billing_details(pending_request_pk, payment_type, payment_number):
     '''
     This function is reached when QBRC staff needs to enter billing details.  The request details

@@ -4,9 +4,11 @@ from main_app.models import *
 
 class ProductAdmin(admin.ModelAdmin):
     list_display = ('name','unit_cost','cnap_workflow_pk', 'is_quantity_limited', 'quantity')
+    list_editable = ('name','unit_cost','cnap_workflow_pk', 'is_quantity_limited', 'quantity')
 
 class PaymentAdmin(admin.ModelAdmin):
     list_display = ('payment_type','number','payment_date','client','code', 'payment_amount')
+    list_editable = ('payment_type','number','client','code', 'payment_amount')
 
 class PendingUserAdmin(admin.ModelAdmin):
     list_display = ('is_pi','info_json')
