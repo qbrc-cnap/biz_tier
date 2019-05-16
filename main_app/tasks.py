@@ -382,13 +382,18 @@ def instantiate_new_research_group(info_dict):
     )
     fc.save()
 
-    # regardless of the request, create a user representing this PI:
-    pi_user_obj = get_user_model().objects.create(
-        first_name = info_dict['PI_FIRST_NAME'],
-        last_name = info_dict['PI_LAST_NAME'],
-        email = info_dict['PI_EMAIL']
-    )
-    pi_user_obj.save()
+    # regardless of the request, create a user representing this PI.
+    # Note, however, that we need to check that this user was not previously
+    # a 'regular' user
+    try:
+        pi_user_obj = get_user_model().objects.get(email=info_dict['PI_EMAIL'])
+    except get_user_model().DoesNotExist:
+        pi_user_obj = get_user_model().objects.create(
+            first_name = info_dict['PI_FIRST_NAME'],
+            last_name = info_dict['PI_LAST_NAME'],
+            email = info_dict['PI_EMAIL']
+        )
+        pi_user_obj.save()
 
     # above that created a regular Django user instance.  We also create a CnapUser instance, which
     # lets us associate the user with a research group

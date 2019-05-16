@@ -585,6 +585,55 @@ class AccountRequestTestCase(TestCase):
         mock_send_account_confirmed_email_to_pi.assert_called_once()
         mock_send_account_confirmed_email_to_qbrc.assert_called_once()
 
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_pi')
+    @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
+    def test_regular_user_tries_to_register_as_pi(self, mock_send_account_confirmed_email_to_qbrc, mock_send_account_confirmed_email_to_pi):
+        '''
+        Here we test the case where we start with a regular user (so they have an entry in our BaseUser table)
+        tries to register an account as a PI.  This should create the group, recognizing that the BaseUser
+        already exists
+        '''
+
+        # create a regular user:
+        # note that the email is set to the PI email since we will 
+        # attempting to take this user and make them a PI
+        # This saves having to write more 'setup' code
+        regular_user = BaseUser.objects.create(
+            first_name = 'Jane',
+            last_name = 'Postdoc',
+            email = settings.TEST_PI_EMAIL
+        )
+
+        # check that we have no ResearchGroup, etc. at the start:
+        # and only a single regular user
+        existing_rg = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_rg), 0)
+        existing_finance_coord = FinancialCoordinator.objects.all()
+        self.assertEqual(len(existing_finance_coord), 0)
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 1)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 0)
+
+        # create a PendingUser for this PI, consistent with a new user request  
+        p = PendingUser.objects.create(
+            is_pi = True, info_json = json.dumps(self.pi_info_dict)
+        )
+        pi_approve_pending_user(p.pk)
+
+        # See that the various objects were created:        
+        existing_rg = ResearchGroup.objects.all()
+        self.assertEqual(len(existing_rg), 1)
+        existing_finance_coord = FinancialCoordinator.objects.all()
+        self.assertEqual(len(existing_finance_coord), 1)
+        existing_users = get_user_model().objects.all()
+        self.assertEqual(len(existing_users), 1)
+        existing_cnap_users = CnapUser.objects.all()
+        self.assertEqual(len(existing_cnap_users), 1)
+
+        mock_send_account_confirmed_email_to_pi.assert_called_once()
+        mock_send_account_confirmed_email_to_qbrc.assert_called_once()
+
 
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_requester')
     @mock.patch('main_app.tasks.send_account_confirmed_email_to_qbrc')
