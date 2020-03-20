@@ -85,6 +85,7 @@ class StaffApprovalView(View):
             pending_user_pk = kwargs['pk']
             try:
                 pending_user = PendingUser.objects.get(pk=pending_user_pk)
+                print('PK=%s' % pending_user_pk)
                 main_tasks.staff_approve_pending_user.delay(pending_user_pk) # have to send the primary key since async
                 return HttpResponse('Process started.')
             except PendingUser.DoesNotExist:

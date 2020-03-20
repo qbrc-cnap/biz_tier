@@ -12,6 +12,8 @@ class PaymentAdmin(admin.ModelAdmin):
 
 class PendingUserAdmin(admin.ModelAdmin):
     list_display = ('is_pi','info_json')
+    list_display_links = ('info_json',)
+    list_editable = ('is_pi',)
 
 class BaseUserAdmin(admin.ModelAdmin):
     list_display = ('email','first_name', 'last_name')

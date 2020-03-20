@@ -72,6 +72,7 @@ REQUIRED_ACCOUNT_CREATION_KEYS = ['FIRST_NAME', \
     'COUNTRY', \
 ]
 
+
 REQUIRED_PIPELINE_CREATION_KEYS = {
     'REGISTERED',
     'EMAIL',
@@ -88,6 +89,14 @@ REQUIRED_PIPELINE_CREATION_KEYS = {
 # flags for common reference
 ACCOUNT_REQUEST = 'account request'
 PIPELINE_REQUEST = 'pipeline request'
+
+# Some fields should be lowered by default.  For each type of request (Account, pipeline)
+# identify the fields which should be lowered.
+INFO_FIELDS_TO_LOWER = {
+    ACCOUNT_REQUEST: ['EMAIL', 'PI_EMAIL', 'FINANCIAL_EMAIL'],
+    PIPELINE_REQUEST: ['EMAIL','PI_EMAIL']
+}
+
 
 def send_self_approval_email_to_pi(pending_user_instance):
     '''
@@ -126,6 +135,7 @@ def send_self_approval_email_to_pi(pending_user_instance):
 
         <p>Please email us with any questions.</p>
     ''' % (full_url)
+    print('send email...')
     send_email(plaintext_msg, message_html, pi_email, subject)
 
 
@@ -491,10 +501,10 @@ def staff_approve_pending_user(pending_user_pk):
     p = PendingUser.objects.get(pk=pending_user_pk)
     info_dict = json.loads(p.info_json)
     is_pi = p.is_pi
-
+    print('pi? %s' % is_pi)
     # generate an approval key:
     add_approval_key_to_pending_user(p)
-
+    print('added approval key')
     # if it was a request by the PI, we simply let them know their request was approved.
     # Note that they still have to approve by clicking in an email-- otherwise anyone could spoof their PI
     if is_pi:
@@ -532,7 +542,7 @@ def is_new_email(mail_server, folder, email_uid):
     return len(p) == 0
 
 
-def parse_email_contents(payload, required_keyset):
+def parse_email_contents(payload, required_keyset, fields_to_lower):
     '''
     Parses the email payload for an account request and returns a dictionary
     '''
@@ -554,6 +564,11 @@ def parse_email_contents(payload, required_keyset):
             info_dict[key] = val
     if len(set(required_keyset).difference(info_dict.keys())) > 0:
         raise MailParseException('Required information was missing in the email sent for account creation.')
+
+    # for email fields (and potentially others), lower-case them here, so we do not worry about doing any manipulations elsewhere
+    for f in fields_to_lower:
+        info_dict[f] = info_dict[f].lower()
+
     return info_dict
 
 
@@ -1327,8 +1342,8 @@ def send_receipt(order_obj, payment):
     ''' % (user_email, pi_email, analysis_type, unit_cost, qty, total_cost, payment_type, code)
 
     send_email(plaintext_msg, message_html, user_email, subject)  
-    send_email(plaintext_msg, message_html, pi_email, subject)  
-    send_email(plaintext_msg, message_html, finance_email, subject)  
+    #send_email(plaintext_msg, message_html, pi_email, subject)  
+    #send_email(plaintext_msg, message_html, finance_email, subject)  
     send_email(plaintext_msg, message_html, settings.QBRC_EMAIL, subject)  
 
 
@@ -1682,10 +1697,10 @@ def process_emails(mail, id_list, request_type):
             mail_body = get_email_body(uid, message)
 
             if request_type == ACCOUNT_REQUEST:
-                info_dict = parse_email_contents(mail_body, REQUIRED_ACCOUNT_CREATION_KEYS)
+                info_dict = parse_email_contents(mail_body, REQUIRED_ACCOUNT_CREATION_KEYS, INFO_FIELDS_TO_LOWER[ACCOUNT_REQUEST])
                 handle_account_request_email(info_dict)
             elif request_type == PIPELINE_REQUEST:
-                info_dict = parse_email_contents(mail_body, REQUIRED_PIPELINE_CREATION_KEYS)
+                info_dict = parse_email_contents(mail_body, REQUIRED_PIPELINE_CREATION_KEYS, INFO_FIELDS_TO_LOWER[PIPELINE_REQUEST])
                 handle_pipeline_request_email(info_dict)
 
         except Exception as ex:

@@ -20,12 +20,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/2.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = ''
+SECRET_KEY = 'jteph!f-6s$2z(jtb6(88+r1l0z8f3s9ruenivkxiu3@xy@ha^'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['cnap-accounts.tm4.org']
 
 
 # Application definition
@@ -145,10 +145,10 @@ CELERY_RESULT_SERIALIZER = 'json'
 ###############################################################################
 # Parameters for the QBRC mailbox
 ###############################################################################
-MAIL_HOST = ''
+MAIL_HOST = 'outlook.office365.com'
 MAIL_PORT = 993
-MAIL_USERNAME = ''
-MAIL_PASSWORD = ''
+MAIL_USERNAME = 'blawney@hsph.harvard.edu'
+MAIL_PASSWORD = '#RowanRiella1306!'
 MAIL_FOLDER_NAME = 'INBOX'
 
 # some dummy emails for testing purposes.  If an email function is invoked
@@ -161,18 +161,17 @@ TEST_FINANCE_EMAIL = 'finance@foo.com'
 TEST_EMAIL_ADDRESSES = [TEST_PI_EMAIL, TEST_FINANCE_EMAIL, TEST_POSTDOC_EMAIL, TEST_GRAD_STUDENT_EMAIL, TEST_ANOTHER_PI_EMAIL]
 
 QBRC_EMAIL = 'qbrc@hsph.harvard.edu'
-HARVARD_FINANCE_CONTACT = ''
+HARVARD_FINANCE_CONTACT = 'brianlawney@gmail.com'
 
 EMAIL_CREDENTIALS_FILE = '/www/credentials/final.json'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 
 
 # For creating CNAP projects:
-CNAP_URL = ''
-CNAP_TOKEN = ''
-
+CNAP_URL = 'https://cnap.tm4.org/analysis/projects/autocreate'
+CNAP_TOKEN = '30a99eaab628e36d66b27f93e69a4155d9053d9c'
 # the url for the url to request a pipeline (including https://...)
-QUALTRICS_PIPELINE_CREATION_URL = ''
+QUALTRICS_PIPELINE_CREATION_URL = 'https://harvard.az1.qualtrics.com/jfe/form/SV_5vuTKBYiRCPKopn'
 
 # the password to access that request url:
-QUALTRICS_PIPELINE_CREATION_PWD = ''
+QUALTRICS_PIPELINE_CREATION_PWD = 'cnap'
